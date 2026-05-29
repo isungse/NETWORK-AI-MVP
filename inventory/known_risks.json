@@ -1,0 +1,52 @@
+[
+  {
+    "device_id": "arista-3f",
+    "management_ip": "172.16.33.251",
+    "interface": "Ethernet52",
+    "severity": "critical",
+    "title": "Errdisabled uplink indication",
+    "source_classification": "live",
+    "evidence": "Live observation reported Ethernet52 errdisabled.",
+    "next_step": "Collect read-only interface status, counters, and LLDP data before planning any recovery action."
+  },
+  {
+    "device_id": "arista-2f-outpatient",
+    "management_ip": "172.16.105.249",
+    "interface": "Ethernet6",
+    "severity": "critical",
+    "title": "High FCS/Rx/Runts indication",
+    "source_classification": "live",
+    "evidence": "Live observation reported high FCS/Rx/Runts counters on Ethernet6.",
+    "next_step": "Collect read-only interface status and counter data, then compare current deltas before any maintenance."
+  },
+  {
+    "device_id": "arista-2f-outpatient",
+    "management_ip": "172.16.105.249",
+    "interface": "Ethernet1",
+    "severity": "critical",
+    "title": "Disabled historical high-error port",
+    "source_classification": "historical",
+    "evidence": "Ethernet1 was disabled after historical 10M/full negotiation plus high runts, input errors, CRC, and output discards. Operator confirmed shutdown was used to identify the connected endpoint/terminal.",
+    "next_step": "Treat as not live truth. Use read-only interface and counter collection to confirm current state before any recovery."
+  },
+  {
+    "device_id": "arista-2f-outpatient",
+    "management_ip": "172.16.105.249",
+    "interface": "Ethernet15",
+    "severity": "warning",
+    "title": "Disabled historical low-speed port",
+    "source_classification": "historical",
+    "evidence": "Ethernet15 was disabled after 10M negotiation. Operator confirmed shutdown was used to identify the connected endpoint/terminal.",
+    "next_step": "Treat as not live truth. Re-check live interface status and endpoint mapping before any no shutdown recovery action."
+  },
+  {
+    "device_id": "arista-1f-outpatient",
+    "management_ip": "172.16.104.250",
+    "interface": null,
+    "severity": "warning",
+    "title": "Live hostname differs from inventory",
+    "source_classification": "live",
+    "evidence": "Live observation reported hostname 4F_1F_ARI_104.250 while inventory/reference data uses a different hostname.",
+    "next_step": "Confirm live hostname through read-only collection, then update inventory in a separate inventory maintenance step."
+  }
+]

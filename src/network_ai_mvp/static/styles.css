@@ -1,0 +1,395 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f7f8;
+  --panel: #ffffff;
+  --ink: #172026;
+  --muted: #66717a;
+  --line: #d7dde2;
+  --accent: #176b87;
+  --accent-strong: #0d4f65;
+  --warn: #9a6200;
+  --danger: #9f2b2b;
+  --ok: #167047;
+  --soft: #eef3f5;
+  --code: #10202b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+select {
+  font: inherit;
+}
+
+button {
+  min-height: 32px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+button:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+select {
+  min-height: 32px;
+  min-width: 160px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 4px 8px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.topbar p {
+  margin: 2px 0 0;
+  color: var(--muted);
+}
+
+.mode-stack {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid var(--ok);
+  border-radius: 6px;
+  color: var(--ok);
+  font-weight: 700;
+  padding: 2px 8px;
+}
+
+.mode-note,
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(420px, 0.95fr) minmax(540px, 1.35fr);
+  grid-template-areas:
+    "inventory detail"
+    "result result"
+    "audit audit";
+  gap: 14px;
+  padding: 14px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.inventory-panel {
+  grid-area: inventory;
+}
+
+.detail-panel {
+  grid-area: detail;
+}
+
+.result-panel {
+  grid-area: result;
+}
+
+.audit-panel {
+  grid-area: audit;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+h2,
+h3 {
+  margin: 0;
+  font-weight: 650;
+}
+
+h2 {
+  font-size: 16px;
+}
+
+h3 {
+  font-size: 14px;
+}
+
+.table-wrap {
+  overflow: auto;
+  max-height: 460px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--soft);
+  color: #31414c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+tr.device-row {
+  cursor: pointer;
+}
+
+tr.device-row:hover,
+tr.device-row.selected {
+  background: #e8f2f5;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.control-row label {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+
+.subpanel {
+  min-width: 0;
+  padding: 12px;
+}
+
+.split .subpanel:first-child {
+  border-right: 1px solid var(--line);
+}
+
+.command-list {
+  margin: 10px 0 0;
+  padding-left: 24px;
+}
+
+.command-list li {
+  margin: 4px 0;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.summary-box {
+  margin-top: 10px;
+  min-height: 88px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfd;
+  padding: 10px;
+}
+
+.summary-box.ok {
+  border-color: rgba(22, 112, 71, 0.35);
+  color: var(--ok);
+}
+
+.summary-box.warn {
+  border-color: rgba(154, 98, 0, 0.35);
+  color: var(--warn);
+}
+
+.summary-box.error {
+  border-color: rgba(159, 43, 43, 0.35);
+  color: var(--danger);
+}
+
+.finding-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.finding {
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.finding.info {
+  border-left-color: var(--accent);
+}
+
+.finding.warning {
+  border-left-color: var(--warn);
+}
+
+.finding.critical {
+  border-left-color: var(--danger);
+}
+
+.finding-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.finding-severity {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.finding p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.result-box {
+  min-height: 360px;
+  max-height: 560px;
+  overflow: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0 0 8px 8px;
+  background: var(--code);
+  color: #eaf3f6;
+  padding: 14px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.audit-wrap {
+  max-height: 300px;
+}
+
+.status-ok {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.status-fail {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "inventory"
+      "detail"
+      "result"
+      "audit";
+  }
+
+  .split {
+    grid-template-columns: 1fr;
+  }
+
+  .split .subpanel:first-child {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar,
+  .control-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mode-stack {
+    align-items: flex-start;
+  }
+
+  .facts {
+    grid-template-columns: 1fr;
+  }
+}
