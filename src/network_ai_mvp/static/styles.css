@@ -358,6 +358,16 @@ tr.device-row.selected {
   font-weight: 700;
 }
 
+.status-connected {
+  color: #53d989;
+  font-weight: 700;
+}
+
+.status-disabled {
+  color: #ff6b6b;
+  font-weight: 700;
+}
+
 @media (max-width: 980px) {
   .layout {
     grid-template-columns: 1fr;

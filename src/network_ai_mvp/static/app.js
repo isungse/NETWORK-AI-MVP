@@ -184,10 +184,10 @@ async function collectSelected() {
       `/devices/${encodeURIComponent(state.selectedDevice.device_id)}/collect/${encodeURIComponent(state.selectedPurpose)}`,
       { method: "POST" },
     );
-    nodes.collectionResult.textContent = formatCollectionResult(result);
+    nodes.collectionResult.innerHTML = formatCollectionResultHtml(result);
     renderSummary(summaryFromResult(result), result.success ? "ok" : "error");
   } catch (error) {
-    nodes.collectionResult.textContent = formatCollectionError(error);
+    nodes.collectionResult.innerHTML = escapeHtml(formatCollectionError(error));
     renderSummary(error.message, "error");
   } finally {
     nodes.collect.disabled = false;
@@ -196,7 +196,7 @@ async function collectSelected() {
   }
 }
 
-function formatCollectionResult(result) {
+function formatCollectionResultHtml(result) {
   const lines = [
     `Device: ${result.device_id} (${result.management_ip})`,
     `Purpose: ${result.purpose}`,
@@ -215,7 +215,7 @@ function formatCollectionResult(result) {
     lines.push("", "===== ERROR SUMMARY =====", result.error_summary);
   }
 
-  return lines.join("\n");
+  return colorizeStatusTokens(escapeHtml(lines.join("\n")));
 }
 
 function formatCollectionError(error) {
@@ -227,6 +227,21 @@ function formatCollectionError(error) {
     "===== ERROR SUMMARY =====",
     error.message,
   ].join("\n");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function colorizeStatusTokens(value) {
+  return value
+    .replace(/\bconnected\b/g, '<span class="status-connected">connected</span>')
+    .replace(/\bdisabled\b/g, '<span class="status-disabled">disabled</span>');
 }
 
 function summaryFromResult(result) {
