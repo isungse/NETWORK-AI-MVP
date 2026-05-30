@@ -115,18 +115,40 @@ function Wait-For([string[]]$Patterns, [int]$MaxMs = 15000) {
 }
 
 try {
-  [void](Wait-For @("(?i)username:", "(?i)login:", "(?i)password:", "[>#]\s*$") 12000)
-  $banner = Read-Telnet -QuietMs 300 -MaxMs 1000
+  $banner = Wait-For @("(?i)username:", "(?i)login:", "(?i)password:", "[>#]\s*$") 12000
+  $banner += Read-Telnet -QuietMs 300 -MaxMs 1000
+  $loginResult = ""
 
-  if ($banner -match "(?i)username:" -or $banner -match "(?i)login:" -or $banner.Length -eq 0) {
+  if ($banner -match "(?i)username:" -or $banner -match "(?i)login:") {
+    Send-Line $user
+    $afterUser = Wait-For @("(?i)password:", "[>#]\s*$", "(?i)authentication failed", "(?i)login invalid", "(?i)incorrect", "(?i)bad passwords?") 10000
+    if ($afterUser -match "(?i)authentication failed|login invalid|incorrect|bad passwords?") {
+      throw "Login failed."
+    }
+    if ($afterUser -match "[>#]\s*$" -and $afterUser -notmatch "(?i)password:") {
+      $loginResult = $afterUser
+    }
+    else {
+      Send-Line $password
+    }
+  }
+  elseif ($banner -match "(?i)password:") {
+    Send-Line $password
+  }
+  elseif ($banner -match "[>#]\s*$") {
+    $loginResult = $banner
+  }
+  elseif ($banner.Length -eq 0) {
     Send-Line $user
     [void](Wait-For @("(?i)password:") 10000)
+    Send-Line $password
   }
 
-  Send-Line $password
-  $loginResult = Wait-For @("[>#]\s*$", "(?i)authentication failed", "(?i)login invalid", "(?i)incorrect") 15000
+  if ($loginResult.Length -eq 0) {
+    $loginResult = Wait-For @("[>#]\s*$", "(?i)password:", "(?i)authentication failed", "(?i)login invalid", "(?i)incorrect", "(?i)bad passwords?", "(?i)access denied") 15000
+  }
 
-  if ($loginResult -match "(?i)authentication failed|login invalid|incorrect") {
+  if ($loginResult -match "(?i)password:|authentication failed|login invalid|incorrect|bad passwords?|access denied") {
     throw "Login failed."
   }
 

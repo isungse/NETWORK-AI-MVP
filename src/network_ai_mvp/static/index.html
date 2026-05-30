@@ -8,13 +8,15 @@
   </head>
   <body>
     <header class="topbar">
-      <div>
+      <div class="topbar-title">
         <h1>Network AI MVP</h1>
-        <p id="apiStatus">Checking API...</p>
+        <p id="apiStatus" class="status-hidden">Checking API...</p>
       </div>
-      <div class="mode-stack" aria-label="Safety mode">
-        <span class="mode-pill">READ-ONLY</span>
-        <span class="mode-note">Allowlisted commands only</span>
+      <div class="topbar-actions">
+        <a class="monitor-link" href="/monitoring" target="_blank" rel="noreferrer">Monitoring</a>
+        <div class="mode-stack" aria-label="Safety mode">
+          <span class="mode-pill">READ-ONLY</span>
+        </div>
       </div>
     </header>
 
@@ -39,6 +41,31 @@
             <tbody id="devicesBody"></tbody>
           </table>
         </div>
+
+        <section class="subpanel neighbors-panel inventory-neighbors-panel" aria-labelledby="neighborsTitle">
+          <div class="subpanel-head">
+            <h3 id="neighborsTitle">Connected Neighbors</h3>
+            <span id="neighborsNote" class="muted">Reference only</span>
+          </div>
+          <div class="table-wrap neighbors-wrap">
+            <table class="neighbors-table">
+              <thead>
+                <tr>
+                  <th>Action</th>
+                  <th>Local Port</th>
+                  <th>Neighbor</th>
+                  <th>IP</th>
+                  <th>Vendor</th>
+                  <th>Platform</th>
+                  <th>Remote Port</th>
+                  <th>Status</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody id="neighborsBody"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
       <section class="panel detail-panel" aria-labelledby="detailTitle">

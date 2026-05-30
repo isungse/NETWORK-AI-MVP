@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Network AI MVP Monitoring</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="monitoring-page">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1>Monitoring</h1>
+        <p id="monitorStatus" class="status-hidden">Waiting for collection result...</p>
+      </div>
+      <div class="topbar-actions">
+        <a class="monitor-link" href="/" target="_blank" rel="noreferrer">Main UI</a>
+        <div class="mode-stack" aria-label="Safety mode">
+          <span class="mode-pill">READ-ONLY</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="monitor-layout">
+      <section class="panel monitor-panel" aria-labelledby="monitorTitle">
+        <div class="panel-head">
+          <h2 id="monitorTitle">Collection Result</h2>
+          <span id="monitorMeta" class="muted">No result mirrored yet</span>
+        </div>
+        <pre id="monitorResult" class="result-box monitor-result">No collection result mirrored yet.</pre>
+      </section>
+    </main>
+
+    <script src="/static/monitoring.js" defer></script>
+  </body>
+</html>

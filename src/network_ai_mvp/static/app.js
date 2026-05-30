@@ -5,6 +5,8 @@ const state = {
   latestPlan: null,
 };
 
+const MONITORING_STORAGE_KEY = "networkAiMvp.collectionResult.v1";
+
 const nodes = {
   apiStatus: document.querySelector("#apiStatus"),
   devicesBody: document.querySelector("#devicesBody"),
@@ -16,6 +18,8 @@ const nodes = {
   commandPlan: document.querySelector("#commandPlan"),
   diagnosticSummary: document.querySelector("#diagnosticSummary"),
   diagnosticFindings: document.querySelector("#diagnosticFindings"),
+  neighborsNote: document.querySelector("#neighborsNote"),
+  neighborsBody: document.querySelector("#neighborsBody"),
   collectionResult: document.querySelector("#collectionResult"),
   auditBody: document.querySelector("#auditBody"),
   refreshDevices: document.querySelector("#refreshDevices"),
@@ -104,6 +108,7 @@ async function loadDevices() {
   renderDevices();
   renderDeviceFacts(state.selectedDevice);
   await loadDiagnostics();
+  await loadNeighbors();
   await loadPurposes();
   setStatus(`API connected. ${state.devices.length} devices loaded.`, true);
 }
@@ -115,8 +120,9 @@ async function selectDevice(deviceId) {
   renderDeviceFacts(state.selectedDevice);
   renderCommandPlan(null);
   await loadDiagnostics();
-  nodes.collectionResult.textContent = "No collection attempted.";
+  await loadNeighbors();
   await loadPurposes();
+  setCollectionResultText(collectionReadyMessage(state.selectedDevice));
 }
 
 async function loadPurposes() {
@@ -155,7 +161,7 @@ async function loadCommandPlan() {
     `/devices/${encodeURIComponent(state.selectedDevice.device_id)}/command-plan/${encodeURIComponent(state.selectedPurpose)}`,
   );
   renderCommandPlan(state.latestPlan);
-  nodes.collect.disabled = false;
+  nodes.collect.disabled = state.selectedDevice.access_method !== "telnet";
 }
 
 function renderCommandPlan(plan) {
@@ -174,9 +180,13 @@ async function collectSelected() {
   if (!state.selectedDevice || !state.selectedPurpose) {
     return;
   }
+  if (state.selectedDevice.access_method !== "telnet") {
+    renderSummary("Collection is disabled until this device access method and credentials are verified.", "warn");
+    return;
+  }
 
   nodes.collect.disabled = true;
-  nodes.collectionResult.textContent = "Collecting read-only command metadata...";
+  setCollectionResultText("Collecting read-only command metadata...");
   renderSummary("Collection request in progress.", "warn");
 
   try {
@@ -184,10 +194,10 @@ async function collectSelected() {
       `/devices/${encodeURIComponent(state.selectedDevice.device_id)}/collect/${encodeURIComponent(state.selectedPurpose)}`,
       { method: "POST" },
     );
-    nodes.collectionResult.innerHTML = formatCollectionResultHtml(result);
+    setCollectionResultHtml(formatCollectionResultHtml(result));
     renderSummary(summaryFromResult(result), result.success ? "ok" : "error");
   } catch (error) {
-    nodes.collectionResult.innerHTML = escapeHtml(formatCollectionError(error));
+    setCollectionResultHtml(escapeHtml(formatCollectionError(error)));
     renderSummary(error.message, "error");
   } finally {
     nodes.collect.disabled = false;
@@ -196,16 +206,47 @@ async function collectSelected() {
   }
 }
 
+function setCollectionResultText(value) {
+  nodes.collectionResult.textContent = value;
+  publishMonitoringResult(nodes.collectionResult.innerHTML, nodes.collectionResult.textContent);
+}
+
+function setCollectionResultHtml(value) {
+  nodes.collectionResult.innerHTML = value;
+  publishMonitoringResult(nodes.collectionResult.innerHTML, nodes.collectionResult.textContent);
+}
+
+function publishMonitoringResult(htmlValue, textValue) {
+  const payload = {
+    html: htmlValue,
+    text: textValue,
+    updated_at: new Date().toISOString(),
+    device_id: state.selectedDevice?.device_id || "",
+    hostname: state.selectedDevice?.hostname || "",
+    management_ip: state.selectedDevice?.management_ip || "",
+    purpose: state.selectedPurpose || "",
+  };
+  localStorage.setItem(MONITORING_STORAGE_KEY, JSON.stringify(payload));
+}
+
 function formatCollectionResultHtml(result) {
+  const endpointSummary = formatEndpointIpSummary(result);
   const lines = [
     `Device: ${result.device_id} (${result.management_ip})`,
     `Purpose: ${result.purpose}`,
     `Result: ${result.success ? "success" : "failure"}    returncode=${text(result.returncode)}    stdout=${text(result.stdout_bytes)} bytes    stderr=${text(result.stderr_bytes)} bytes`,
     `Commands: ${Array.isArray(result.commands) ? result.commands.join(" | ") : "-"}`,
+  ];
+
+  if (endpointSummary) {
+    lines.push("", "===== CONNECTED ENDPOINTS =====", endpointSummary);
+  }
+
+  lines.push(
     "",
     "===== STDOUT =====",
     result.stdout || "(no stdout)",
-  ];
+  );
 
   if (!result.success && result.stderr) {
     lines.push("", "===== STDERR =====", result.stderr);
@@ -216,6 +257,157 @@ function formatCollectionResultHtml(result) {
   }
 
   return colorizeStatusTokens(escapeHtml(lines.join("\n")));
+}
+
+function formatEndpointIpSummary(result) {
+  if (!Array.isArray(result.commands) || !result.commands.includes("show interfaces description")) {
+    return "";
+  }
+  if (!result.commands.includes("show mac address-table") || !result.commands.includes("show ip arp")) {
+    return "";
+  }
+
+  const sections = commandSections(result.stdout || "");
+  const descriptions = parseInterfaceDescriptions(sections.get("show interfaces description") || "");
+  const macEntries = parseMacAddressTable(sections.get("show mac address-table") || "");
+  const arpEntries = parseIpArp(sections.get("show ip arp") || "");
+  if (!descriptions.length || !macEntries.length || !arpEntries.length) {
+    return "";
+  }
+
+  const ipsByMac = new Map();
+  for (const entry of arpEntries) {
+    if (!ipsByMac.has(entry.mac)) {
+      ipsByMac.set(entry.mac, new Set());
+    }
+    ipsByMac.get(entry.mac).add(entry.ip);
+  }
+
+  const endpointsByInterface = new Map();
+  for (const entry of macEntries) {
+    const ips = ipsByMac.get(entry.mac);
+    if (!ips || !ips.size) {
+      continue;
+    }
+    const interfaceName = shortInterfaceName(entry.interfaceName);
+    if (!endpointsByInterface.has(interfaceName)) {
+      endpointsByInterface.set(interfaceName, []);
+    }
+    for (const ip of ips) {
+      endpointsByInterface.get(interfaceName).push({ ip, mac: entry.macText });
+    }
+  }
+
+  const lines = [];
+  for (const item of descriptions) {
+    const interfaceName = shortInterfaceName(item.interfaceName);
+    const endpoints = endpointsByInterface.get(interfaceName) || [];
+    if (!endpoints.length) {
+      continue;
+    }
+    lines.push(`${interfaceName}  ${item.status}/${item.protocol}  ${item.description || "-"}`);
+    for (const endpoint of endpoints.sort((left, right) => ipSortKey(left.ip) - ipSortKey(right.ip))) {
+      lines.push(`  - ip=${endpoint.ip.padEnd(15)} mac=${endpoint.mac}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function commandSections(stdout) {
+  const sections = new Map();
+  let current = "";
+  let buffer = [];
+
+  for (const line of String(stdout || "").split(/\r?\n/)) {
+    const match = line.match(/^===== (.+?) =====$/);
+    if (match) {
+      if (current) {
+        sections.set(current, buffer.join("\n"));
+      }
+      current = match[1].trim();
+      buffer = [];
+      continue;
+    }
+    if (current) {
+      buffer.push(line);
+    }
+  }
+
+  if (current) {
+    sections.set(current, buffer.join("\n"));
+  }
+  return sections;
+}
+
+function parseInterfaceDescriptions(section) {
+  const rows = [];
+  for (const line of section.split(/\r?\n/)) {
+    const trimmed = line.trimEnd();
+    if (!trimmed || trimmed.startsWith("Interface ") || /[>#]\s*$/.test(trimmed)) {
+      continue;
+    }
+    const match = trimmed.match(/^(\S+)\s+(\S+)\s+(\S+)\s*(.*)$/);
+    if (!match) {
+      continue;
+    }
+    rows.push({
+      interfaceName: match[1],
+      status: match[2],
+      protocol: match[3],
+      description: match[4].trim(),
+    });
+  }
+  return rows;
+}
+
+function parseMacAddressTable(section) {
+  const rows = [];
+  for (const line of section.split(/\r?\n/)) {
+    const match = line.match(/^\s*\S+\s+([0-9a-f]{4}[.:-][0-9a-f]{4}[.:-][0-9a-f]{4})\s+\S+.*\s+(\S+)\s*$/i);
+    if (!match || /^CPU$/i.test(match[2])) {
+      continue;
+    }
+    rows.push({
+      mac: normalizeMac(match[1]),
+      macText: canonicalMac(match[1]),
+      interfaceName: match[2],
+    });
+  }
+  return rows;
+}
+
+function parseIpArp(section) {
+  const rows = [];
+  for (const line of section.split(/\r?\n/)) {
+    const match = line.match(/\b(\d{1,3}(?:\.\d{1,3}){3})\s+\S+\s+([0-9a-f]{4}[.:-][0-9a-f]{4}[.:-][0-9a-f]{4})\s+/i);
+    if (!match) {
+      continue;
+    }
+    rows.push({
+      ip: match[1],
+      mac: normalizeMac(match[2]),
+    });
+  }
+  return rows;
+}
+
+function normalizeMac(value) {
+  return String(value || "").replace(/[^0-9a-f]/gi, "").toLowerCase();
+}
+
+function canonicalMac(value) {
+  const normalized = normalizeMac(value);
+  if (normalized.length !== 12) {
+    return String(value || "");
+  }
+  return `${normalized.slice(0, 4)}.${normalized.slice(4, 8)}.${normalized.slice(8, 12)}`;
+}
+
+function ipSortKey(value) {
+  return String(value || "")
+    .split(".")
+    .reduce((sum, octet) => (sum * 256) + Number(octet || 0), 0);
 }
 
 function formatCollectionError(error) {
@@ -286,6 +478,126 @@ async function loadDiagnostics() {
     item.append(title, evidence, next);
     nodes.diagnosticFindings.append(item);
   }
+}
+
+async function loadNeighbors() {
+  nodes.neighborsBody.replaceChildren();
+  nodes.neighborsNote.textContent = "Reference only";
+  if (!state.selectedDevice) {
+    return;
+  }
+
+  const payload = await api(`/devices/${encodeURIComponent(state.selectedDevice.device_id)}/neighbors`);
+  nodes.neighborsNote.textContent = payload.reference_note;
+  if (!payload.neighbors.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 9;
+    cell.className = "muted empty-cell";
+    cell.textContent = "No backbone neighbor reference for this device.";
+    row.append(cell);
+    nodes.neighborsBody.append(row);
+    return;
+  }
+
+  for (const neighbor of payload.neighbors) {
+    const row = document.createElement("tr");
+    const managedDevice = findManagedNeighbor(neighbor);
+    appendNeighborAction(row, managedDevice);
+    appendCells(row, [
+      shortInterfaceName(neighbor.local_interface),
+      neighbor.neighbor_name,
+      neighbor.management_ip || "IP not set",
+      neighbor.vendor,
+      neighbor.platform,
+      shortInterfaceName(neighbor.remote_interface),
+      neighbor.status,
+      neighbor.discovery,
+    ]);
+    row.children[7].className = `neighbor-status ${statusClass(neighbor.status)}`;
+    if (neighbor.notes) {
+      row.title = neighbor.notes;
+    }
+    if (managedDevice) {
+      row.classList.add("neighbor-row", "managed");
+      row.addEventListener("click", () => openManagedDevice(managedDevice.device_id));
+    }
+    nodes.neighborsBody.append(row);
+  }
+}
+
+function findManagedNeighbor(neighbor) {
+  const ip = neighbor.management_ip || "";
+  const name = neighbor.neighbor_name || "";
+  return (
+    state.devices.find((device) => ip && device.management_ip === ip) ||
+    state.devices.find((device) => name && device.hostname === name) ||
+    null
+  );
+}
+
+function appendNeighborAction(row, managedDevice) {
+  const cell = document.createElement("td");
+  if (!managedDevice) {
+    cell.textContent = "Not managed";
+    cell.className = "muted";
+    row.append(cell);
+    return;
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "table-action";
+  button.textContent = "Detail";
+  button.title =
+    managedDevice.access_method === "telnet"
+      ? "Show device detail, command plan, diagnostics, and collection controls."
+      : "Show device detail and command plan. Collection is disabled until access is verified.";
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openManagedDevice(managedDevice.device_id);
+  });
+  cell.append(button);
+  row.append(cell);
+}
+
+async function openManagedDevice(deviceId) {
+  await selectDevice(deviceId);
+  const access = state.selectedDevice?.access_method || "unknown";
+  const collectState = access === "telnet" ? "collect enabled" : "collect disabled until access is verified";
+  setStatus(`Selected ${deviceId}. ${collectState}.`, true);
+  document.querySelector(".detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+function collectionReadyMessage(device) {
+  if (!device) {
+    return "No collection attempted.";
+  }
+  if (device.access_method !== "telnet") {
+    return [
+      `Device: ${device.device_id} (${device.management_ip})`,
+      "Collection: disabled",
+      "",
+      "===== SAFETY NOTICE =====",
+      "This neighbor is in inventory for planning and diagnostics, but access method and credentials are not verified.",
+      "Command Plan is available. Live collection will remain blocked until Telnet/SSH/API access is explicitly confirmed.",
+    ].join("\n");
+  }
+  return "No collection attempted.";
+}
+
+function shortInterfaceName(value) {
+  return String(value || "")
+    .replace(/^TenGigabitEthernet/i, "Te")
+    .replace(/^GigabitEthernet/i, "Gi")
+    .replace(/^FastEthernet/i, "Fa")
+    .replace(/^Ethernet/i, "Et")
+    .replace(/^Port-channel/i, "Po")
+    .replace(/^Vlan/i, "Vl");
+}
+
+function statusClass(status) {
+  return String(status || "").replace(/[^a-z0-9-]/gi, "").toLowerCase();
 }
 
 function highestSeverity(findings) {

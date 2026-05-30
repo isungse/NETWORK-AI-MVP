@@ -12,6 +12,18 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(plan.read_only)
         self.assertIn("show interfaces status", plan.commands)
 
+    def test_cisco_endpoint_plan_collects_correlation_inputs(self) -> None:
+        device = load_devices("inventory/devices.csv")[0]
+        baseline = build_command_plan(device, "baseline")
+        endpoints = build_command_plan(device, "endpoints")
+
+        self.assertIn("show interfaces description", baseline.commands)
+        self.assertNotIn("show mac address-table", baseline.commands)
+        self.assertNotIn("show ip arp", baseline.commands)
+        self.assertIn("show interfaces description", endpoints.commands)
+        self.assertIn("show mac address-table", endpoints.commands)
+        self.assertIn("show ip arp", endpoints.commands)
+
     def test_rejects_config_commands(self) -> None:
         with self.assertRaises(CommandPolicyError):
             validate_commands("arista", ["configure terminal"])

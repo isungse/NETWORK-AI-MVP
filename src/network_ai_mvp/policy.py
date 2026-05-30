@@ -19,6 +19,12 @@ READ_ONLY_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
             "show ip interface brief",
             "show interfaces description",
         ),
+        "endpoints": (
+            "terminal length 0",
+            "show interfaces description",
+            "show mac address-table",
+            "show ip arp",
+        ),
         "topology": (
             "terminal length 0",
             "show cdp neighbors",
@@ -49,6 +55,12 @@ READ_ONLY_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
             "show version",
             "show interfaces status",
             "show interfaces description",
+        ),
+        "endpoints": (
+            "terminal length 0",
+            "show interfaces description",
+            "show mac address-table",
+            "show ip arp",
         ),
         "topology": (
             "terminal length 0",

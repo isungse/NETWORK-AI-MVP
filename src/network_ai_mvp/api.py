@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
@@ -10,9 +12,11 @@ from .diagnostics import assess_device_risks, summarize_findings
 from .executor import PowerShellTelnetReadOnlyExecutor
 from .inventory import InventoryError, get_device, load_devices
 from .models import CommandPlan, Device
+from .neighbors import get_neighbors_for_device
 from .policy import CommandPolicyError, allowed_purposes, build_command_plan
 
 DEFAULT_INVENTORY = Path(__file__).resolve().parents[2] / "inventory" / "devices.csv"
+DEFAULT_BACKBONE_NEIGHBORS = Path(__file__).resolve().parents[2] / "inventory" / "backbone_neighbors.json"
 DEFAULT_AUDIT_LOG = Path(__file__).resolve().parents[2] / "logs" / "collection_audit.jsonl"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -20,6 +24,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 def create_app(
     inventory_path: str | Path = DEFAULT_INVENTORY,
     *,
+    backbone_neighbors_path: str | Path = DEFAULT_BACKBONE_NEIGHBORS,
     audit_log_path: str | Path = DEFAULT_AUDIT_LOG,
     executor: PowerShellTelnetReadOnlyExecutor | None = None,
     credential_resolver: Callable[[str], str | Path] = resolve_credential_path,
@@ -38,6 +43,10 @@ def create_app(
     @app.get("/", include_in_schema=False)
     def index():
         return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/monitoring", include_in_schema=False)
+    def monitoring():
+        return FileResponse(STATIC_DIR / "monitoring.html")
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -82,6 +91,21 @@ def create_app(
             "findings": [asdict(finding) for finding in findings],
         }
 
+    @app.get("/devices/{device_id}/neighbors")
+    def device_neighbors(device_id: str):
+        try:
+            device = get_device(load_devices(inventory_path), device_id)
+        except InventoryError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        neighbors = get_neighbors_for_device(backbone_neighbors_path, device.device_id)
+        return {
+            "device_id": device.device_id,
+            "hostname": device.hostname,
+            "reference_note": "Reference only. Re-check live CDP/LLDP before acting.",
+            "neighbors": [asdict(neighbor) for neighbor in neighbors],
+        }
+
     @app.get("/vendors/{vendor}/purposes")
     def purposes(vendor: str) -> dict[str, tuple[str, ...]]:
         return {"purposes": allowed_purposes(vendor)}
@@ -106,6 +130,20 @@ def create_app(
             )
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+        if plan.device.access_method != "telnet":
+            error_summary = (
+                f"Device {plan.device.device_id} access_method is {plan.device.access_method}; "
+                "read-only collect requires explicit Telnet MVP access."
+            )
+            _write_failure_audit(
+                audit_log_path,
+                plan=plan,
+                device_id=device_id,
+                purpose=purpose,
+                error_summary=error_summary,
+            )
+            raise HTTPException(status_code=400, detail=error_summary)
+
         try:
             credential_path = credential_resolver(plan.device.credential_ref)
             result = command_executor.run(plan, credential_path=credential_path)
@@ -121,7 +159,8 @@ def create_app(
             raise HTTPException(status_code=500, detail=error_summary) from exc
 
         success = result.returncode == 0
-        error_summary = "" if success else _summarize_error(result.stderr or result.stdout)
+        stderr = _readable_powershell_stream(result.stderr)
+        error_summary = "" if success else _summarize_error(stderr or result.stdout)
         append_audit_event(
             audit_log_path,
             new_audit_event(
@@ -146,7 +185,7 @@ def create_app(
             "stdout_bytes": len(result.stdout.encode("utf-8")),
             "stderr_bytes": len(result.stderr.encode("utf-8")),
             "stdout": redact_text(result.stdout),
-            "stderr": redact_text(result.stderr),
+            "stderr": redact_text(stderr),
             "error_summary": error_summary,
         }
 
@@ -205,8 +244,23 @@ def _write_failure_audit(
 
 
 def _summarize_error(value: str) -> str:
+    value = _readable_powershell_stream(value)
     for line in value.splitlines():
         stripped = line.strip()
         if stripped:
             return redact_text(stripped[:300])
     return ""
+
+
+def _readable_powershell_stream(value: str) -> str:
+    if "<S S=\"Error\">" not in value:
+        return value
+
+    messages = []
+    for match in re.findall(r"<S S=\"Error\">(.*?)</S>", value, flags=re.DOTALL):
+        text = html.unescape(match)
+        text = text.replace("_x000D__x000A_", "\n")
+        stripped = text.strip()
+        if stripped:
+            messages.append(stripped)
+    return "\n".join(messages) if messages else value

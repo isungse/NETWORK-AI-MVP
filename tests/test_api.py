@@ -52,6 +52,7 @@ class ApiTests(unittest.TestCase):
     def test_health_and_devices_endpoints(self) -> None:
         health = self.client.get("/health")
         index = self.client.get("/")
+        monitoring = self.client.get("/monitoring")
         devices = self.client.get("/devices")
         device = self.client.get("/devices/arista-10g-core")
 
@@ -59,6 +60,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(health.json(), {"status": "ok", "mode": "read-only"})
         self.assertEqual(index.status_code, 200)
         self.assertIn("Network AI MVP", index.text)
+        self.assertEqual(monitoring.status_code, 200)
+        self.assertIn("Monitoring", monitoring.text)
         self.assertEqual(devices.status_code, 200)
         self.assertGreaterEqual(len(devices.json()), 2)
         self.assertNotIn("credential_ref", devices.json()[0])
@@ -89,6 +92,23 @@ class ApiTests(unittest.TestCase):
         self.assertIn("Disabled historical high-error port", titles)
         self.assertIn("[CRITICAL]", payload["summary"])
         self.assertIn("Not live truth", payload["summary"])
+
+    def test_device_neighbors_endpoint_returns_reference_neighbors(self) -> None:
+        response = self.client.get("/devices/cisco-backbone/neighbors")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["device_id"], "cisco-backbone")
+        names = {neighbor["neighbor_name"] for neighbor in payload["neighbors"]}
+        self.assertIn("9F_BB_ARI_17.2", names)
+        self.assertIn("9F Computer Room Cisco Switch", names)
+        computer_room = [
+            neighbor
+            for neighbor in payload["neighbors"]
+            if neighbor["neighbor_name"] == "9F Computer Room Cisco Switch"
+        ][0]
+        self.assertIsNone(computer_room["management_ip"])
+        self.assertEqual(computer_room["status"], "ip-not-set")
 
     def test_collect_uses_mocked_executor_and_writes_audit_metadata(self) -> None:
         response = self.client.post("/devices/arista-10g-core/collect/baseline")
@@ -168,6 +188,30 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("NETWORK_AI_CREDENTIAL_ARISTA_KCL", text)
         self.assertNotIn("credential_ref", text)
         self.assertNotIn("password", text.lower())
+
+    def test_collect_failure_summarizes_powershell_clixml_error(self) -> None:
+        executor = FakeExecutor(
+            returncode=1,
+            stderr=(
+                '#< CLIXML\n<Objs><S S="Error">Login failed._x000D__x000A_</S>'
+                '<S S="Error">at script line 152_x000D__x000A_</S></Objs>'
+            ),
+        )
+        app = create_app(
+            audit_log_path=self.audit_path,
+            executor=executor,
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+        )
+        client = TestClient(app)
+
+        response = client.post("/devices/arista-10g-core/collect/baseline")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["success"])
+        self.assertEqual(payload["error_summary"], "Login failed.")
+        self.assertIn("Login failed.", payload["stderr"])
+        self.assertNotIn("#< CLIXML", payload["stderr"])
 
 
 if __name__ == "__main__":
