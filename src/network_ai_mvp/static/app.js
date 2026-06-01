@@ -3,6 +3,7 @@ const state = {
   selectedDevice: null,
   selectedPurpose: "",
   latestPlan: null,
+  selectedPort: null,
 };
 
 const MONITORING_STORAGE_KEY = "networkAiMvp.collectionResult.v1";
@@ -13,6 +14,8 @@ const nodes = {
   selectedDeviceId: document.querySelector("#selectedDeviceId"),
   deviceFacts: document.querySelector("#deviceFacts"),
   purposeSelect: document.querySelector("#purposeSelect"),
+  checkDevice: document.querySelector("#checkDevice"),
+  checkResults: document.querySelector("#checkResults"),
   loadPlan: document.querySelector("#loadPlan"),
   collect: document.querySelector("#collect"),
   commandPlan: document.querySelector("#commandPlan"),
@@ -20,6 +23,12 @@ const nodes = {
   diagnosticFindings: document.querySelector("#diagnosticFindings"),
   neighborsNote: document.querySelector("#neighborsNote"),
   neighborsBody: document.querySelector("#neighborsBody"),
+  searchInput: document.querySelector("#searchInput"),
+  searchButton: document.querySelector("#searchButton"),
+  searchResultsBody: document.querySelector("#searchResultsBody"),
+  diagnosePort: document.querySelector("#diagnosePort"),
+  portDetailFacts: document.querySelector("#portDetailFacts"),
+  portDetailState: document.querySelector("#portDetailState"),
   collectionResult: document.querySelector("#collectionResult"),
   auditBody: document.querySelector("#auditBody"),
   refreshDevices: document.querySelector("#refreshDevices"),
@@ -107,22 +116,33 @@ async function loadDevices() {
   }
   renderDevices();
   renderDeviceFacts(state.selectedDevice);
+  renderCheckResults(null);
+  updateCheckButton();
   await loadDiagnostics();
   await loadNeighbors();
   await loadPurposes();
+  renderPortDetail(null);
   setStatus(`API connected. ${state.devices.length} devices loaded.`, true);
 }
 
 async function selectDevice(deviceId) {
   state.selectedDevice = state.devices.find((device) => device.device_id === deviceId) || null;
   state.latestPlan = null;
+  state.selectedPort = null;
   renderDevices();
   renderDeviceFacts(state.selectedDevice);
   renderCommandPlan(null);
+  renderPortDetail(null);
+  renderCheckResults(null);
+  updateCheckButton();
   await loadDiagnostics();
   await loadNeighbors();
   await loadPurposes();
   setCollectionResultText(collectionReadyMessage(state.selectedDevice));
+}
+
+function updateCheckButton() {
+  nodes.checkDevice.disabled = !state.selectedDevice || state.selectedDevice.access_method !== "telnet";
 }
 
 async function loadPurposes() {
@@ -174,6 +194,232 @@ function renderCommandPlan(plan) {
     item.textContent = command;
     nodes.commandPlan.append(item);
   }
+}
+
+async function checkSelectedDevice() {
+  if (!state.selectedDevice) {
+    return;
+  }
+  if (state.selectedDevice.access_method !== "telnet") {
+    renderCheckResults([{
+      label: "CHECK",
+      status: "fail",
+      detail: "This device is not enabled for read-only collection.",
+    }]);
+    return;
+  }
+
+  nodes.checkDevice.disabled = true;
+  state.selectedPurpose = "check";
+  renderCheckResults([{
+    label: "CHECK",
+    status: "unknown",
+    detail: "Running allowlisted read-only interface, endpoint, topology, and switching checks...",
+  }]);
+  setCollectionResultText("Running one-click read-only network check...");
+  renderSummary("CHECK request in progress.", "warn");
+
+  try {
+    const result = await api(
+      `/devices/${encodeURIComponent(state.selectedDevice.device_id)}/check`,
+      { method: "POST" },
+    );
+    renderCheckResults(result.check_items);
+    setCollectionResultHtml(formatCheckResultHtml(result));
+    renderSummary(
+      result.success ? "CHECK completed. Review the Network Check results." : `CHECK failed. ${text(result.error_summary)}`,
+      result.success ? "ok" : "error",
+    );
+  } catch (error) {
+    renderCheckResults([{
+      label: "CHECK",
+      status: "fail",
+      detail: error.message,
+    }]);
+    setCollectionResultHtml(escapeHtml(formatCollectionError(error)));
+    renderSummary(error.message, "error");
+  } finally {
+    updateCheckButton();
+    await loadAudit();
+    await loadDiagnostics();
+  }
+}
+
+function renderCheckResults(items) {
+  nodes.checkResults.replaceChildren();
+  const rows = items || [
+    { label: "저속 협상 포트 자동 탐지", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
+    { label: "CRC/error 많은 포트 탐지", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
+    { label: "uplink/LACP/trunk 이상 탐지", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
+    { label: "IP-MAC-Port 자동 추적", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
+    { label: "구성도와 실제 연결 상태 불일치 탐지", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
+  ];
+  for (const item of rows) {
+    const article = document.createElement("article");
+    const status = checkStatus(item.status);
+    article.className = `check-item ${status}`;
+
+    const statusNode = document.createElement("div");
+    statusNode.className = "check-status";
+    statusNode.textContent = status;
+
+    const labelNode = document.createElement("div");
+    labelNode.className = "check-label";
+    labelNode.textContent = item.label;
+
+    const detailNode = document.createElement("div");
+    detailNode.className = "check-detail";
+    detailNode.textContent = item.detail;
+
+    article.append(statusNode, labelNode, detailNode);
+    nodes.checkResults.append(article);
+  }
+}
+
+function checkStatus(status) {
+  return ["ok", "warn", "fail", "unknown"].includes(status) ? status : "unknown";
+}
+
+async function runSearch() {
+  const query = nodes.searchInput.value.trim();
+  nodes.searchResultsBody.replaceChildren();
+  if (!query) {
+    appendEmptySearchRow("Enter a device, port, IP, or MAC search.");
+    return;
+  }
+
+  const payload = await api(`/search?q=${encodeURIComponent(query)}`);
+  if (!payload.results.length) {
+    appendEmptySearchRow("No parsed or reference matches.");
+    return;
+  }
+
+  for (const result of payload.results) {
+    const row = document.createElement("tr");
+    row.className = "search-result-row";
+    appendCells(row, [
+      result.type,
+      result.label,
+      result.source,
+      result.summary,
+    ]);
+    row.addEventListener("click", () => openSearchResult(result));
+    nodes.searchResultsBody.append(row);
+  }
+}
+
+function appendEmptySearchRow(message) {
+  const row = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.colSpan = 4;
+  cell.className = "muted empty-cell";
+  cell.textContent = message;
+  row.append(cell);
+  nodes.searchResultsBody.append(row);
+}
+
+async function openSearchResult(result) {
+  if (result.device_id) {
+    await selectDevice(result.device_id);
+  }
+  if (result.type === "port" && result.device_id && result.interface) {
+    await loadPortDetail(result.device_id, result.interface);
+    document.querySelector(".port-detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    return;
+  }
+  if (result.type === "neighbor") {
+    renderReferencePortDetail(result);
+    document.querySelector(".port-detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+}
+
+async function loadPortDetail(deviceId, interfaceName) {
+  const payload = await api(
+    `/devices/${encodeURIComponent(deviceId)}/ports/${encodeURIComponent(interfaceName)}/latest`,
+  );
+  if (!payload.data_available) {
+    renderPortDetail(null, payload.message || "No stored parsed observation for this port yet.");
+    return;
+  }
+  renderPortDetail(payload.port);
+}
+
+function renderPortDetail(port, message = "Search for a port, IP, MAC, or device to inspect stored parsed state.") {
+  state.selectedPort = port;
+  nodes.portDetailFacts.replaceChildren();
+  nodes.diagnosePort.disabled = !state.selectedDevice || !port;
+  if (!port) {
+    nodes.portDetailState.className = "summary-box warn";
+    nodes.portDetailState.textContent = message;
+    return;
+  }
+
+  const facts = [
+    ["Interface", port.interface],
+    ["Status", port.status],
+    ["VLAN", port.vlan],
+    ["Speed / Duplex", `${text(port.speed)} / ${text(port.duplex)}`],
+    ["Description", port.description],
+    ["Endpoint IPs", listText(port.endpoint_ips)],
+    ["Endpoint MACs", listText(port.endpoint_macs)],
+    ["Neighbor", port.neighbor_name],
+    ["Neighbor IP", port.neighbor_ip],
+    ["Neighbor Platform", port.neighbor_platform],
+    ["Errors", `FCS=${port.fcs_errors || 0}, Rx=${port.rx_errors || 0}, Runts=${port.runts || 0}, Tx=${port.tx_errors || 0}`],
+    ["Source", `${text(port.source_purpose)} ${text(port.source_timestamp)}`],
+    ["Recent Changes", "No stored history yet."],
+  ];
+
+  for (const [label, value] of facts) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = text(value);
+    nodes.portDetailFacts.append(dt, dd);
+  }
+  nodes.portDetailState.className = "summary-box ok";
+  nodes.portDetailState.textContent = "Stored parsed observation loaded. Documentation/reference data is not treated as live truth.";
+}
+
+function renderReferencePortDetail(result) {
+  state.selectedPort = null;
+  nodes.portDetailFacts.replaceChildren();
+  nodes.diagnosePort.disabled = !state.selectedDevice;
+  const facts = [
+    ["Interface", result.interface],
+    ["Reference Target", result.label],
+    ["Source", result.source],
+    ["Summary", result.summary],
+    ["Recent Changes", "No stored history yet."],
+  ];
+  for (const [label, value] of facts) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = text(value);
+    nodes.portDetailFacts.append(dt, dd);
+  }
+  nodes.portDetailState.className = "summary-box warn";
+  nodes.portDetailState.textContent = "Reference match only. Run read-only collection before treating this as live state.";
+}
+
+async function diagnoseSelectedPort() {
+  if (!state.selectedDevice) {
+    return;
+  }
+  const options = Array.from(nodes.purposeSelect.options).map((option) => option.value);
+  if (!options.includes("interfaces")) {
+    renderSummary("No allowlisted interfaces purpose is available for this device.", "error");
+    return;
+  }
+  state.selectedPurpose = "interfaces";
+  nodes.purposeSelect.value = "interfaces";
+  await loadCommandPlan();
+  renderSummary("Port diagnostic plan loaded. Review the allowlisted commands, then click Collect when ready.", "warn");
+}
+
+function listText(values) {
+  return Array.isArray(values) && values.length ? values.join(", ") : "-";
 }
 
 async function collectSelected() {
@@ -231,6 +477,7 @@ function publishMonitoringResult(htmlValue, textValue) {
 
 function formatCollectionResultHtml(result) {
   const endpointSummary = formatEndpointIpSummary(result);
+  const interfaceSummary = formatInterfaceFindingSummary(result);
   const lines = [
     `Device: ${result.device_id} (${result.management_ip})`,
     `Purpose: ${result.purpose}`,
@@ -240,6 +487,10 @@ function formatCollectionResultHtml(result) {
 
   if (endpointSummary) {
     lines.push("", "===== CONNECTED ENDPOINTS =====", endpointSummary);
+  }
+
+  if (interfaceSummary) {
+    lines.push("", "===== INTERFACE FINDINGS =====", interfaceSummary);
   }
 
   lines.push(
@@ -259,7 +510,201 @@ function formatCollectionResultHtml(result) {
   return colorizeStatusTokens(escapeHtml(lines.join("\n")));
 }
 
+function formatCheckResultHtml(result) {
+  const device = result.device || {};
+  const lines = [
+    `Device: ${device.device_id || "-"} (${device.management_ip || "-"})`,
+    "Purpose: check",
+    `Result: ${result.success ? "success" : "failure"}    returncode=${text(result.returncode)}    stdout=${text(result.stdout_bytes)} bytes    stderr=${text(result.stderr_bytes)} bytes`,
+    `Purposes: ${Array.isArray(result.purposes_collected) ? result.purposes_collected.join(" | ") : "-"}`,
+    `Commands: ${Array.isArray(result.commands) ? result.commands.join(" | ") : "-"}`,
+    "",
+    "===== NETWORK CHECK =====",
+  ];
+
+  for (const item of result.check_items || []) {
+    lines.push(`[${String(item.status || "unknown").toUpperCase()}] ${item.label}: ${item.detail}`);
+  }
+
+  if (Array.isArray(result.parsed_ports) && result.parsed_ports.length) {
+    lines.push("", "===== INTERFACE FINDINGS =====", formatInterfaceFindingSummaryFromPorts(result.parsed_ports));
+    const endpoints = formatEndpointIpSummaryFromPorts(result.parsed_ports);
+    if (endpoints) {
+      lines.push("", "===== CONNECTED ENDPOINTS =====", endpoints);
+    }
+  }
+
+  lines.push("", "===== STDOUT =====", result.stdout || "(no stdout)");
+
+  if (!result.success && result.stderr) {
+    lines.push("", "===== STDERR =====", result.stderr);
+  }
+
+  if (result.error_summary) {
+    lines.push("", "===== ERROR SUMMARY =====", result.error_summary);
+  }
+
+  return colorizeStatusTokens(escapeHtml(lines.join("\n")));
+}
+
+function formatInterfaceFindingSummary(result) {
+  if (Array.isArray(result.parsed_ports) && result.parsed_ports.length) {
+    return formatInterfaceFindingSummaryFromPorts(result.parsed_ports);
+  }
+  if (!Array.isArray(result.commands) || !result.commands.includes("show interfaces status")) {
+    return "";
+  }
+
+  const sections = commandSections(result.stdout || "");
+  const statusRows = parseInterfaceStatus(sections.get("show interfaces status") || "");
+  const counterRows = parseInterfaceErrorCounters(sections.get("show interfaces counters errors") || "");
+  if (!statusRows.length && !counterRows.length) {
+    return "";
+  }
+
+  const statusByPort = new Map(statusRows.map((row) => [row.port, row]));
+  const lowSpeedRows = statusRows.filter((row) => {
+    const speed = speedMbps(row.speed);
+    return row.status === "connected" && speed !== null && speed < 1000;
+  });
+  const disabledRows = statusRows.filter((row) => row.status === "disabled" || row.status === "errdisabled");
+  const highCounterRows = counterRows.filter((row) => Math.max(row.fcs, row.rx, row.runts, row.tx) >= 1000);
+
+  const lines = [];
+  if (lowSpeedRows.length) {
+    lines.push("LOW-SPEED CONNECTED PORTS");
+    for (const row of lowSpeedRows) {
+      lines.push(`- ${row.port}  status=${row.status}  vlan=${row.vlan}  duplex=${row.duplex}  speed=${row.speed}`);
+    }
+  } else {
+    lines.push("LOW-SPEED CONNECTED PORTS");
+    lines.push("- none found in collected interface status");
+  }
+
+  if (disabledRows.length) {
+    lines.push("", "DISABLED PORTS");
+    for (const row of disabledRows) {
+      lines.push(`- ${row.port}  status=${row.status}  vlan=${row.vlan}  speed=${row.speed}`);
+    }
+  }
+
+  if (highCounterRows.length) {
+    lines.push("", "HIGH ERROR COUNTERS");
+    for (const row of highCounterRows) {
+      const status = statusByPort.get(row.port);
+      const state = status ? `  current=${status.status}/${status.speed}` : "";
+      lines.push(`- ${row.port}${state}  FCS=${row.fcs}  Rx=${row.rx}  Runts=${row.runts}  Tx=${row.tx}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function formatInterfaceFindingSummaryFromPorts(ports) {
+  const lowSpeedRows = ports.filter((port) => (
+    port.status === "connected" &&
+    Number.isFinite(port.speed_mbps) &&
+    port.speed_mbps < 1000
+  ));
+  const disabledRows = ports.filter((port) => port.status === "disabled" || port.status === "errdisabled");
+  const highCounterRows = ports.filter((port) => Math.max(
+    Number(port.fcs_errors || 0),
+    Number(port.rx_errors || 0),
+    Number(port.runts || 0),
+    Number(port.tx_errors || 0),
+  ) >= 1000);
+
+  const lines = [];
+  lines.push("LOW-SPEED CONNECTED PORTS");
+  if (lowSpeedRows.length) {
+    for (const port of lowSpeedRows) {
+      lines.push(`- ${port.interface}  status=${port.status}  vlan=${port.vlan || "-"}  duplex=${port.duplex || "-"}  speed=${port.speed || "-"}`);
+    }
+  } else {
+    lines.push("- none found in collected interface status");
+  }
+
+  if (disabledRows.length) {
+    lines.push("", "DISABLED PORTS");
+    for (const port of disabledRows) {
+      lines.push(`- ${port.interface}  status=${port.status}  vlan=${port.vlan || "-"}  speed=${port.speed || "-"}`);
+    }
+  }
+
+  if (highCounterRows.length) {
+    lines.push("", "HIGH ERROR COUNTERS");
+    for (const port of highCounterRows) {
+      lines.push(`- ${port.interface}  current=${port.status || "-"}/${port.speed || "-"}  FCS=${port.fcs_errors || 0}  Rx=${port.rx_errors || 0}  Runts=${port.runts || 0}  Tx=${port.tx_errors || 0}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function parseInterfaceStatus(section) {
+  const statusTokens = new Set(["connected", "notconnect", "disabled", "errdisabled"]);
+  const rows = [];
+  for (const line of section.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("Port ") || /[>#]\s*$/.test(trimmed)) {
+      continue;
+    }
+    const parts = trimmed.split(/\s+/);
+    const statusIndex = parts.findIndex((part, index) => index > 0 && statusTokens.has(part.toLowerCase()));
+    if (statusIndex < 1 || parts.length < statusIndex + 4) {
+      continue;
+    }
+    rows.push({
+      port: shortInterfaceName(parts[0]),
+      name: parts.slice(1, statusIndex).join(" "),
+      status: parts[statusIndex].toLowerCase(),
+      vlan: parts[statusIndex + 1],
+      duplex: parts[statusIndex + 2],
+      speed: parts[statusIndex + 3],
+    });
+  }
+  return rows;
+}
+
+function parseInterfaceErrorCounters(section) {
+  const rows = [];
+  for (const line of section.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("Port ") || /[>#]\s*$/.test(trimmed)) {
+      continue;
+    }
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 8) {
+      continue;
+    }
+    rows.push({
+      port: shortInterfaceName(parts[0]),
+      fcs: Number(parts[1] || 0),
+      align: Number(parts[2] || 0),
+      symbol: Number(parts[3] || 0),
+      rx: Number(parts[4] || 0),
+      runts: Number(parts[5] || 0),
+      giants: Number(parts[6] || 0),
+      tx: Number(parts[7] || 0),
+    });
+  }
+  return rows;
+}
+
+function speedMbps(value) {
+  const normalized = String(value || "").toLowerCase().replace(/^a-/, "");
+  const match = normalized.match(/^(\d+)(m|g)$/);
+  if (!match) {
+    return null;
+  }
+  const amount = Number(match[1]);
+  return match[2] === "g" ? amount * 1000 : amount;
+}
+
 function formatEndpointIpSummary(result) {
+  if (Array.isArray(result.parsed_ports) && result.parsed_ports.length) {
+    return formatEndpointIpSummaryFromPorts(result.parsed_ports);
+  }
   if (!Array.isArray(result.commands) || !result.commands.includes("show interfaces description")) {
     return "";
   }
@@ -311,6 +756,29 @@ function formatEndpointIpSummary(result) {
     }
   }
 
+  return lines.join("\n");
+}
+
+function formatEndpointIpSummaryFromPorts(ports) {
+  const lines = [];
+  for (const port of ports) {
+    const endpoints = [];
+    for (const ip of port.endpoint_ips || []) {
+      endpoints.push({ ip, mac: "-" });
+    }
+    for (const mac of port.endpoint_macs || []) {
+      if (!endpoints.some((endpoint) => endpoint.mac === mac)) {
+        endpoints.push({ ip: "-", mac });
+      }
+    }
+    if (!endpoints.length) {
+      continue;
+    }
+    lines.push(`${port.interface}  ${port.status || "-"}/${port.speed || "-"}  ${port.description || "-"}`);
+    for (const endpoint of endpoints) {
+      lines.push(`  - ip=${String(endpoint.ip).padEnd(15)} mac=${endpoint.mac}`);
+    }
+  }
   return lines.join("\n");
 }
 
@@ -649,11 +1117,26 @@ nodes.refreshDevices.addEventListener("click", () => {
 nodes.refreshAudit.addEventListener("click", () => {
   loadAudit().catch((error) => setStatus(error.message, false));
 });
+nodes.checkDevice.addEventListener("click", () => {
+  checkSelectedDevice().catch((error) => renderSummary(error.message, "error"));
+});
 nodes.loadPlan.addEventListener("click", () => {
   loadCommandPlan().catch((error) => renderSummary(error.message, "error"));
 });
 nodes.collect.addEventListener("click", () => {
   collectSelected().catch((error) => renderSummary(error.message, "error"));
+});
+nodes.searchButton.addEventListener("click", () => {
+  runSearch().catch((error) => setStatus(error.message, false));
+});
+nodes.searchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    runSearch().catch((error) => setStatus(error.message, false));
+  }
+});
+nodes.diagnosePort.addEventListener("click", () => {
+  diagnoseSelectedPort().catch((error) => renderSummary(error.message, "error"));
 });
 nodes.purposeSelect.addEventListener("change", () => {
   state.selectedPurpose = nodes.purposeSelect.value;

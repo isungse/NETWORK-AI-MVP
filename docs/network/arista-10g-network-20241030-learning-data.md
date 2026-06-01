@@ -196,7 +196,7 @@ Important Cisco backbone port descriptions from live output:
 | `Gi2/21` | up/up | `=9F-SW-Connected=` |
 | `Gi2/23` | down/down | `=Firewall-Connected=` |
 | `Gi2/24` | down/down | Unused/not connected at time of check |
-| `Gi3/24` | up/up | Cisco PoE switch for 3F WiFi/AP segment, CDP neighbor `KCL_PTSM_3F_WiFi` |
+| `Gi3/24` | up/up | 2026-06-01 live observation shows Aruba IAP `PTSM_OR`, management IP `172.16.33.111`, MAC/chassis `1c28.afc2.54ae` |
 | `Gi3/45` | down/down | `=Firewall-Connected=` |
 | `Gi3/46` | up/up | `=Firewall-Connected=` |
 | `Gi3/47` | up/up | `=IPScan-Connected=` |
@@ -204,17 +204,19 @@ Important Cisco backbone port descriptions from live output:
 
 ## 3F WiFi / Aruba AP Path
 
-Confirmed from Cisco backbone read-only checks.
+Updated from Cisco backbone read-only checks. Older observations showed Cisco PoE switch `KCL_PTSM_3F_WiFi` on this port; the current live observation supersedes that reference.
 
 - The relevant Cisco backbone "24번 포트" is `GigabitEthernet3/24`.
 - `GigabitEthernet2/24` is not connected.
 - `GigabitEthernet3/24` is connected as an access port in VLAN `33` (`3F-Network`).
-- `GigabitEthernet3/24` speed/duplex: `100Mb/s`, full-duplex.
-- CDP neighbor on `Gi3/24`: `KCL_PTSM_3F_WiFi`
-- Neighbor platform: `Cisco WS-C2960-24PC-L`
-- Neighbor management IP: `172.16.33.63`
-- Neighbor port facing backbone: `FastEthernet0/2`
-- Interpretation: the Aruba AP is not directly connected to Cisco backbone `Gi3/24`; Cisco PoE switch `KCL_PTSM_3F_WiFi` is connected there, and the AP is downstream of that PoE switch.
+- `GigabitEthernet3/24` speed/duplex from interface status: `1G`, full-duplex.
+- LLDP/CDP neighbor on `Gi3/24`: `PTSM_OR`
+- Neighbor platform/description: `ArubaOS (MODEL: 505), Version Aruba IAP`
+- Neighbor management IP: `172.16.33.111`
+- Neighbor MAC/chassis ID: `1c28.afc2.54ae`
+- Neighbor port facing backbone: `eth0`
+- Operator clarification: this Aruba AP is being pre-tested for 3F installation, so it was intentionally configured in the 3F `172.16.33.x` network while connected to backbone `Gi3/24`.
+- Interpretation: the Aruba AP is currently directly visible from Cisco backbone `Gi3/24`. Do not use the stale Cisco `KCL_PTSM_3F_WiFi` record for collection or change planning without a fresh live check.
 
 ## Arista 172.16.104.250 Direct Check
 

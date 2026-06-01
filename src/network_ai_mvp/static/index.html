@@ -24,9 +24,45 @@
       <section class="panel inventory-panel" aria-labelledby="inventoryTitle">
         <div class="panel-head">
           <h2 id="inventoryTitle">Inventory</h2>
-          <button id="refreshDevices" type="button">Refresh</button>
+          <div class="panel-actions">
+            <button id="checkDevice" type="button" disabled>CHECK</button>
+            <button id="refreshDevices" type="button">Refresh</button>
+          </div>
         </div>
-        <div class="table-wrap">
+        <section class="subpanel search-panel" aria-labelledby="searchTitle">
+          <div class="subpanel-head">
+            <h3 id="searchTitle">Operations Search</h3>
+            <span class="muted">Device / port / IP / MAC</span>
+          </div>
+          <div class="search-row">
+            <label for="searchInput">Search</label>
+            <input id="searchInput" type="search" placeholder="Gi3/24, 172.16.33.111, 1c28.afc2.54ae" />
+            <button id="searchButton" type="button">Search</button>
+          </div>
+          <div class="table-wrap search-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Target</th>
+                  <th>Source</th>
+                  <th>Summary</th>
+                </tr>
+              </thead>
+              <tbody id="searchResultsBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="subpanel check-panel" aria-labelledby="checkTitle">
+          <div class="subpanel-head">
+            <h3 id="checkTitle">Network Check</h3>
+            <span class="muted">Read-only allowlist only</span>
+          </div>
+          <div id="checkResults" class="check-list"></div>
+        </section>
+
+        <div class="table-wrap inventory-wrap">
           <table>
             <thead>
               <tr>
@@ -93,6 +129,15 @@
             <div id="diagnosticFindings" class="finding-list"></div>
           </section>
         </div>
+
+        <section class="subpanel port-detail-panel" aria-labelledby="portDetailTitle">
+          <div class="subpanel-head">
+            <h3 id="portDetailTitle">Port Detail</h3>
+            <button id="diagnosePort" type="button" disabled>Diagnose This Port</button>
+          </div>
+          <dl id="portDetailFacts" class="facts compact-facts"></dl>
+          <div id="portDetailState" class="summary-box">Search for a port, IP, MAC, or device to inspect stored parsed state.</div>
+        </section>
 
       </section>
 

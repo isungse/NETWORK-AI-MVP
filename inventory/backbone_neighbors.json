@@ -134,14 +134,14 @@
   {
     "source_device_id": "cisco-backbone",
     "local_interface": "GigabitEthernet3/24",
-    "neighbor_name": "KCL_PTSM_3F_WiFi",
-    "management_ip": "172.16.33.63",
-    "vendor": "cisco",
-    "platform": "WS-C2960-24PC-L",
-    "remote_interface": "FastEthernet0/2",
-    "discovery": "CDP",
+    "neighbor_name": "PTSM_OR",
+    "management_ip": "172.16.33.111",
+    "vendor": "aruba",
+    "platform": "Aruba IAP-505",
+    "remote_interface": "eth0",
+    "discovery": "LLDP",
     "status": "confirmed",
-    "notes": "Cisco neighbor observed from backbone."
+    "notes": "Live BACKBONE-SW observation on 2026-06-01: Aruba IAP on Gi3/24, MAC/chassis 1c28.afc2.54ae, VLAN 33, 1G full. Operator clarified this is a pre-installation 3F WiFi test using the 172.16.33.x network. Replaces stale Cisco KCL_PTSM_3F_WiFi reference."
   },
   {
     "source_device_id": "cisco-backbone",

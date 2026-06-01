@@ -13,8 +13,16 @@ from network_ai_mvp.executor import CommandResult
 
 
 class FakeExecutor:
-    def __init__(self, *, returncode: int = 0, stderr: str = "", error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        returncode: int = 0,
+        stdout: str = "collected output",
+        stderr: str = "",
+        error: Exception | None = None,
+    ) -> None:
         self.returncode = returncode
+        self.stdout = stdout
         self.stderr = stderr
         self.error = error
         self.calls = []
@@ -29,7 +37,7 @@ class FakeExecutor:
             management_ip=plan.device.management_ip,
             purpose=plan.purpose,
             commands=plan.commands,
-            stdout="collected output",
+            stdout=self.stdout,
             stderr=self.stderr,
             returncode=self.returncode,
         )
@@ -41,9 +49,11 @@ class ApiTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.audit_path = Path(self.temp_dir.name) / "audit.jsonl"
+        self.data_dir = Path(self.temp_dir.name) / "data"
         self.executor = FakeExecutor()
         app = create_app(
             audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
             executor=self.executor,
             credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
         )
@@ -60,6 +70,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(health.json(), {"status": "ok", "mode": "read-only"})
         self.assertEqual(index.status_code, 200)
         self.assertIn("Network AI MVP", index.text)
+        self.assertNotIn("Ask Plan", index.text)
         self.assertEqual(monitoring.status_code, 200)
         self.assertIn("Monitoring", monitoring.text)
         self.assertEqual(devices.status_code, 200)
@@ -70,6 +81,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(device.json()["management_ip"], "172.17.17.2")
         self.assertNotIn("credential_ref", device.json())
         self.assertNotIn("credential_ref", device.text)
+
+    def test_ask_plan_endpoint_remains_removed(self) -> None:
+        response = self.client.post("/ask/plan", json={"message": "test"})
+
+        self.assertEqual(response.status_code, 404)
 
     def test_command_plan_endpoint(self) -> None:
         response = self.client.get("/devices/arista-10g-core/command-plan/topology")
@@ -126,6 +142,95 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(audit_record["device_id"], "arista-10g-core")
         self.assertEqual(audit_record["success"], True)
         self.assertNotIn("password", self.audit_path.read_text(encoding="utf-8").lower())
+        self.assertTrue(payload["observation_stored"])
+
+    def test_ports_latest_and_search_use_stored_parsed_observation(self) -> None:
+        stdout = (
+            "===== show interfaces status =====\n"
+            "Port       Name   Status       Vlan     Duplex Speed  Type\n"
+            "Et6               connected    22       a-full a-100M 1000BASE-T\n"
+            "===== show interfaces counters errors =====\n"
+            "Port               FCS    Align   Symbol       Rx    Runts   Giants       Tx\n"
+            "Et6            7846661        0  7831865  9687745  1841084        0        0\n"
+            "===== show mac address-table =====\n"
+            "22      b42e.9906.7712    DYNAMIC     Et6\n"
+            "===== show ip arp =====\n"
+            "172.16.22.153   0:01       b42e.9906.7712  Vlan22\n"
+        )
+        app = create_app(
+            audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
+            executor=FakeExecutor(stdout=stdout),
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+        )
+        client = TestClient(app)
+
+        collect = client.post("/devices/arista-2f-outpatient/collect/interfaces")
+        ports = client.get("/devices/arista-2f-outpatient/ports/latest")
+        port = client.get("/devices/arista-2f-outpatient/ports/Et6/latest")
+        search = client.get("/search?q=172.16.22.153")
+
+        self.assertEqual(collect.status_code, 200)
+        self.assertTrue(collect.json()["observation_stored"])
+        self.assertEqual(collect.json()["parsed_ports"][0]["interface"], "Et6")
+        self.assertEqual(ports.status_code, 200)
+        self.assertTrue(ports.json()["data_available"])
+        self.assertEqual(ports.json()["summary"]["low_speed_connected_ports"], 1)
+        self.assertEqual(port.status_code, 200)
+        self.assertEqual(port.json()["port"]["speed_mbps"], 100)
+        self.assertEqual(search.status_code, 200)
+        self.assertEqual(search.json()["results"][0]["type"], "port")
+
+    def test_device_check_runs_only_allowlisted_purposes_and_returns_check_items(self) -> None:
+        stdout = (
+            "===== show interfaces status =====\n"
+            "Port       Name   Status       Vlan     Duplex Speed  Type\n"
+            "Et6               connected    22       a-full a-100M 1000BASE-T\n"
+            "Et7               connected    22       a-full a-10M  1000BASE-T\n"
+            "Et52              connected    trunk    full   10G    10GBASE-SR\n"
+            "===== show interfaces counters errors =====\n"
+            "Port               FCS    Align   Symbol       Rx    Runts   Giants       Tx\n"
+            "Et6            7846661        0  7831865  9687745  1841084        0        0\n"
+            "===== show mac address-table =====\n"
+            "22      b42e.9906.7712    DYNAMIC     Et6\n"
+            "===== show ip arp =====\n"
+            "172.16.22.153   0:01       b42e.9906.7712  Vlan22\n"
+        )
+        app = create_app(
+            audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
+            executor=FakeExecutor(stdout=stdout),
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+        )
+        client = TestClient(app)
+
+        response = client.post("/devices/arista-2f-outpatient/check")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["purpose"], "check")
+        self.assertEqual(payload["purposes_collected"], ["interfaces", "endpoints", "topology", "switching"])
+        self.assertIn("show interfaces status", payload["commands"])
+        self.assertIn("show mac address-table", payload["commands"])
+        self.assertTrue(payload["observation_stored"])
+        items = {item["key"]: item for item in payload["check_items"]}
+        self.assertEqual(items["low_speed"]["status"], "warn")
+        self.assertIn("\n", items["low_speed"]["detail"])
+        self.assertIn("Et6:", items["low_speed"]["detail"])
+        self.assertIn("Et7:", items["low_speed"]["detail"])
+        self.assertEqual(items["high_errors"]["status"], "warn")
+        self.assertEqual(items["ip_mac_port"]["status"], "ok")
+        self.assertNotIn("credential_ref", response.text)
+
+    def test_search_returns_reference_neighbor_without_live_truth_claim(self) -> None:
+        response = self.client.get("/search?q=172.16.33.111")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        reference_matches = [item for item in payload["results"] if item["source"] == "reference_neighbor"]
+        self.assertTrue(reference_matches)
+        self.assertIn("Reference only", reference_matches[0]["summary"])
 
     def test_collect_blocks_unknown_purpose_before_executor(self) -> None:
         response = self.client.post("/devices/arista-10g-core/collect/shutdown")
@@ -173,6 +278,7 @@ class ApiTests(unittest.TestCase):
         )
         app = create_app(
             audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
             executor=executor,
             credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
         )
@@ -199,6 +305,7 @@ class ApiTests(unittest.TestCase):
         )
         app = create_app(
             audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
             executor=executor,
             credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
         )

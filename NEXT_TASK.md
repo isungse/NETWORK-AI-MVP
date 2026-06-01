@@ -2,15 +2,28 @@
 
 ## Immediate Next Step
 
-Commit the stable UI checkpoint changes, then continue with the next feature phase.
+Continue from the 2026-06-01 one-click CHECK checkpoint and commit the current implementation/documentation checkpoint if desired.
 
-Current uncommitted changes:
+Latest pushed feature commit:
 
-- Collection Result renders terminal-style stdout rather than escaped JSON.
-- Collection Result highlights only:
-  - `connected` in green
-  - `disabled` in red
-- `PROJECT_STATUS.md` and `NEXT_TASK.md` were added for session continuity.
+```text
+2d7aea2 Add topology neighbors and monitoring view
+```
+
+Current documentation update:
+
+- `docs/SESSION_SHUTDOWN_PROTOCOL.md`
+- `PROJECT_STATUS.md`
+- `NEXT_TASK.md`
+- `docs/network/NETWORK_AI_MVP_HANDOFF.md`
+
+Current uncommitted implementation scope:
+
+- Backend parsed observations and local redacted storage.
+- Deterministic Operations Search and Port Detail.
+- Inventory-top one-click `CHECK` workflow.
+- `POST /devices/{device_id}/check`.
+- CHECK result display with one port per line for multi-port findings.
 
 Recommended first commands next session:
 
@@ -20,24 +33,42 @@ git status --short
 $env:PYTHONPATH='src'
 python -m unittest discover -s tests
 node --check src\network_ai_mvp\static\app.js
+node --check src\network_ai_mvp\static\monitoring.js
 ```
 
-If the UI should remain the accepted direction, commit and push:
-
-```powershell
-git add src/network_ai_mvp/static/app.js src/network_ai_mvp/static/styles.css PROJECT_STATUS.md NEXT_TASK.md
-git commit -m "Improve collection result terminal display"
-git push
-```
+Expected test result at this checkpoint: `Ran 38 tests, OK`.
 
 ## Recommended Development Order
 
-1. Add a read-only observation storage pipeline.
-2. Add parser-backed diagnostics.
-3. Add natural-language Ask panel that maps requests to safe read-only intents.
-4. Add collection run history and raw output retrieval by run id.
-5. Replace Telnet transport with SSH/API where possible.
-6. Only after read-only stability, design approval-based single-interface `shutdown/no shutdown`.
+1. Add CHECK result row links to Port Detail for affected ports.
+2. Broaden persisted observation history beyond latest-only state and add run IDs.
+3. Improve LLDP/CDP detail parsing for neighbor name, management IP, platform, and remote port.
+4. Add parser-backed LACP/trunk/STP anomaly verdicts for CHECK.
+5. Add documented-topology vs live-observed-topology mismatch checks.
+6. Add reliable recent-change comparison once observation history exists.
+7. Add daily morning health report foundation from stored observations.
+8. Add expected-low-speed classification so known 100M/10M endpoint links can be separated from abnormal low-speed links.
+9. Replace Telnet transport with SSH/API where possible.
+10. Later revisit LLM as a bounded intent extraction and result summary layer.
+11. Only after read-only stability, design approval-based single-interface `shutdown/no shutdown`.
+
+## Natural-Language Ask/Chat Decision
+
+Natural-language Ask/Chat was prototyped and deferred on 2026-06-01.
+
+Reason:
+
+- Rule-based natural-language intent mapping is not reliable enough for real network operations.
+- Requests such as `BACKBONE-SW 연결 된 Gi3/24 포트를 확인하고 어떤 장비가 연결 된 지 알려주세요` need topology/endpoint evidence and explicit target validation, not a guessed generic command purpose.
+- The active product should focus first on accurate structured network state and port/device-centered workflows.
+
+Future LLM constraints:
+
+- LLM may be used only for controlled intent extraction and result summarization.
+- LLM must not generate executable CLI.
+- Backend must validate device, interface, and purpose before planning.
+- Commands must always come from backend allowlists.
+- User approval is still required before collection or any future change action.
 
 ## Next Feature Prompt
 
@@ -55,7 +86,7 @@ Before coding:
 - Inspect git status and preserve any uncommitted user changes.
 
 Goal:
-Add local read-only observation storage and parser-backed diagnostics.
+Continue the port/device-centered operations console from the one-click CHECK checkpoint.
 
 Scope:
 - Read-only only.
@@ -66,12 +97,11 @@ Scope:
 - Do not add Supabase/PostgreSQL yet.
 - Preserve the current terminal-style Collection Result UI.
 - Preserve green connected and red disabled highlighting.
+- Preserve the `/monitoring` page and Connected Neighbors UI.
+- Preserve separate Purpose `endpoints`.
 
 Implement:
-1. Create a local data layout:
-   - data/raw/
-   - data/observations/
-   - data/audit/ if needed, or keep logs/ if already established.
+1. Add CHECK result row links to Port Detail for affected ports.
 2. Store each successful collection result:
    - timestamp
    - device_id
@@ -84,22 +114,30 @@ Implement:
    - returncode
    - success
 3. Do not store credential paths or secrets.
-4. Add parsers for the most important outputs:
-   - Cisco `show interfaces status`
-   - Arista `show interfaces status`
-   - Cisco/Arista interface error counters
-   - LLDP neighbor basics
-5. Add diagnostics from parsed observations:
+4. Broaden local observation storage from latest-only to run-id history.
+5. Improve parsers for the most important outputs:
+   - Cisco/Arista LLDP detail
+   - Cisco CDP detail
+   - LACP/trunk/STP basics
+6. Improve endpoint correlation in backend parsed observations:
+   - pair IP and MAC per endpoint when possible
+   - keep unmatched MAC or IP observations explicit
+7. Improve CHECK diagnostics from parsed observations:
    - connected low-speed ports
    - disabled/errdisabled ports
    - high error counters
    - uplink-aware filtering where possible
-6. Add API endpoints:
+8. Add daily health summary API and UI foundation.
+9. Add documented/reference topology vs live observed topology comparison.
+10. Add API endpoints:
    - GET /observations
    - GET /devices/{device_id}/observations/latest
    - GET /devices/{device_id}/diagnostics/latest
-7. Update UI:
-   - show parsed findings separately from raw stdout
+   - GET /devices/{device_id}/endpoints/latest
+11. Update UI:
+   - show parser-backed diagnostics separately from raw stdout
+   - show connected endpoints as structured rows from backend parsed observations
+   - show recent changes only after reliable history exists
    - keep raw stdout visible and copyable
    - keep the current visual direction
 
@@ -127,6 +165,11 @@ Verification:
   - `NETWORK_AI_CREDENTIAL_BACKBONE_ADMIN`
   - `NETWORK_AI_CREDENTIAL_ARISTA_KCL`
 - Live collection should remain read-only and use only policy allowlisted purposes.
+- One-click CHECK currently runs fixed allowlisted purposes only: `interfaces`, `endpoints`, `topology`, `switching`.
+- `B1F_ARI_101.249` is inventory device `arista-b1f-3`.
+- Latest live CHECK for `arista-b1f-3` found low-speed ports including `Et4` at `a-100M` and `Et27` at `a-10M`; user-visible later output showed additional VLAN 101 low-speed ports. Re-check live before operational action.
+- Cisco access switches discovered from backbone neighbors are listed as Telnet targets, but credentials still need vendor confirmation.
+- `172.16.102.250` currently rejects the tested stored credentials despite TCP/23 being reachable.
 
 ## High-Priority Follow-Ups
 
@@ -134,11 +177,13 @@ Verification:
 - Re-check `172.16.105.249 Ethernet6` error counter deltas.
 - Keep `172.16.105.249 Ethernet1` and `Ethernet15` as historical operator-confirmed shutdowns until live state is rechecked.
 - Add a known-risk refresh process so inventory/reference data does not drift from live observations.
+- Confirm correct credential set for Cisco access switches.
+- Keep `Gi3/38` neighbor-only until a management IP is configured.
 - Decide when to migrate Telnet to SSH/API.
 
 ## Intentionally Postponed
 
-- Natural-language chat UI.
+- Natural-language chat UI. The rule-based prototype was removed from active code and deferred.
 - Approval-based changes.
 - Database integration.
 - Supabase/PostgreSQL.

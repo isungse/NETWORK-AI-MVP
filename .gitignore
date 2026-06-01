@@ -9,4 +9,5 @@ venv/
 *.cred.xml
 logs/
 logs/*.jsonl
+data/
 src/*.egg-info/

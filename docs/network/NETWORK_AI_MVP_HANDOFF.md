@@ -39,6 +39,63 @@ Recommended stack:
 - Do not run `write memory` during quick verification tests unless explicitly approved.
 - Log every command, result, target, requester, and timestamp.
 
+## Product Direction Update - 2026-06-01
+
+Natural-language Ask/Chat was prototyped and then removed from active product code.
+
+Decision:
+
+- Defer natural-language Ask/Chat for now.
+- Rule-based natural-language intent mapping is not reliable enough for operational network diagnostics.
+- Requests such as `BACKBONE-SW 연결 된 Gi3/24 포트를 확인하고 어떤 장비가 연결 된 지 알려주세요` require structured topology/endpoint evidence and target validation, not a guessed generic command purpose.
+
+Current priority:
+
+- Build a port/device-centered operations console.
+- Add port search, device search, IP/MAC search, and a port detail page/panel.
+- Persist structured read-only collection observations locally.
+- Correlate interface status, LLDP/CDP, MAC, ARP, errors, speed, and VLAN per port.
+- Add a `diagnose this port` button that uses only existing read-only command purposes.
+
+Initial implementation status:
+
+- Successful read-only collections can now write redacted raw output under `data/raw/` and parsed latest observations under `data/observations/`.
+- The repository ignores `data/` because it is runtime state and may contain device output.
+- Parsed port state includes interface status, VLAN, speed/duplex, descriptions, endpoint IP/MAC evidence, basic LLDP neighbor fields where available, and error counters.
+- The UI has deterministic Operations Search and Port Detail panels.
+- `Diagnose This Port` loads the existing allowlisted `interfaces` command plan and does not execute until the user clicks the existing `Collect` button.
+- Recent changes intentionally shows a neutral no-history state until reliable observation history exists.
+- One-click `CHECK` is available from the Inventory header after device selection.
+- `CHECK` runs only backend-fixed read-only allowlisted purposes: `interfaces`, `endpoints`, `topology`, and `switching`.
+- `CHECK` displays five operator-facing results:
+  - low-speed negotiated port detection
+  - high CRC/error/runts detection
+  - uplink/LACP/trunk anomaly foundation
+  - IP-MAC-Port correlation
+  - documented topology vs live observed topology foundation
+- CHECK multi-port findings are rendered one port per line for readability.
+
+Latest live CHECK observations captured during the 2026-06-01 session:
+
+- `cisco-backbone` CHECK completed successfully.
+  - No parsed low-speed port found at collection time.
+  - No parsed high error counter port found at collection time.
+  - 53 ports had IP/MAC correlation.
+  - 12 ports had live neighbor observations.
+- `arista-b1f-3` / `B1F_ARI_101.249` CHECK completed successfully.
+  - Low-speed negotiated ports included `Et4` at `a-100M` and `Et27` at `a-10M`.
+  - User-visible later output showed additional VLAN `101` low-speed ports; re-check live before acting.
+
+These observations are collection-time evidence, not permanent truth.
+
+Future LLM direction:
+
+- LLM may be used only for controlled intent extraction and result summarization.
+- LLM must not generate executable CLI.
+- Backend must validate device, interface, and purpose.
+- Commands must always come from backend allowlists.
+- User approval is still required before collection or any future change action.
+
 ## Known Network Facts
 
 Primary detailed knowledge file:
@@ -114,12 +171,52 @@ Existing script:
 
 It is currently used for Cisco/Arista Telnet sessions with encrypted local PowerShell credentials.
 
+Current helper behavior:
+
+- Handles username/password Telnet prompts.
+- Handles password-only Telnet prompts.
+- Fails fast with `Login failed.` when a device rejects credentials.
+- API error handling converts PowerShell CLIXML error output into readable summaries.
+
 Credential files used during exploration:
 
 - Cisco: `%USERPROFILE%\backbone_admin.cred.xml`
 - Arista: `%USERPROFILE%\arista_kcl.cred.xml`
 
 Do not commit or copy credential files into the project.
+
+## Latest UI/API Checkpoint - 2026-05-30
+
+Implemented since the initial handoff:
+
+- Local FastAPI UI at `/`.
+- Monitoring page at `/monitoring`.
+- Connected Neighbors table under Inventory.
+- Backbone neighbor reference data in `inventory/backbone_neighbors.json`.
+- Neighbor API: `GET /devices/{device_id}/neighbors`.
+- Separate Purpose `endpoints` for endpoint IP/MAC correlation.
+- Collection Result terminal-style rendering with color highlighting:
+  - `connected`: green
+  - `disabled`: red
+- Public API device serializers hide credential refs.
+- Audit/error redaction removes credential and secret-like values.
+
+Important topology/reference additions:
+
+- `9F_BB_ARI_17.2 / 172.17.17.2` is confirmed by LLDP as the Arista 10G core on Cisco `Te1/3` and `Te1/4`.
+- `Po10` is the Cisco/Arista LACP bundle.
+- Cisco backbone CDP/LLDP neighbors with management IPs are included in inventory as Telnet read-only targets, pending credential confirmation where needed.
+- `Gi3/38` is the 9F computer room Cisco switch. It has no management IP configured and remains neighbor-only.
+- `172.16.102.250` is reachable on TCP/23, but tested stored credentials were rejected with `Login failed.`
+
+Operational decision:
+
+- Endpoint IP/MAC correlation is not part of `baseline`.
+- Use Purpose `endpoints` to collect:
+  - `show interfaces description`
+  - `show mac address-table`
+  - `show ip arp`
+- The UI groups connected endpoint IP/MAC results by interface instead of appending long IP lists to interface description lines.
 
 ## Recommended Next Files In New Project
 
@@ -148,5 +245,7 @@ Network-AI-MVP/
 5. MAC/ARP correlation
 6. Low-speed port detection
 7. CRC/error/runts detection
-8. Natural-language report generation
-9. Approval-based `shutdown/no shutdown` as the first controlled change feature
+8. Port/device-centered operations console
+9. Structured collection observation storage
+10. Controlled result summarization after backend validation
+11. Approval-based `shutdown/no shutdown` as the first controlled change feature

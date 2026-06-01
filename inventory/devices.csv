@@ -22,4 +22,3 @@ cisco-6f-data,Data_6F_66.250,172.16.66.250,cisco,WS-C2960X-24TS-L,access,telnet,
 cisco-7f-data,Data_7F_77.250,172.16.77.250,cisco,WS-C2960X-24TS-L,access,telnet,backbone_admin,"Discovered from BACKBONE-SW CDP/LLDP on Gi2/17; Telnet enabled for read-only MVP collection; verify live access"
 cisco-8f-data,Data_8F_88.250,172.16.88.250,cisco,WS-C2960X-24TS-L,access,telnet,backbone_admin,"Discovered from BACKBONE-SW CDP on Gi2/19; Telnet enabled for read-only MVP collection; verify live access"
 cisco-9f-data,Data_9F_99.250,172.16.99.250,cisco,WS-C2960X-24TS-L,access,telnet,backbone_admin,"Discovered from BACKBONE-SW CDP on Gi2/21; Telnet enabled for read-only MVP collection; verify live access"
-cisco-3f-wifi,KCL_PTSM_3F_WiFi,172.16.33.63,cisco,WS-C2960-24PC-L,access,telnet,backbone_admin,"Discovered from BACKBONE-SW CDP on Gi3/24; Telnet enabled for read-only MVP collection; verify live access"
