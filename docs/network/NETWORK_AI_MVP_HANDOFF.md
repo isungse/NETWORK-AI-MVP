@@ -182,6 +182,7 @@ Credential files used during exploration:
 
 - Cisco: `%USERPROFILE%\backbone_admin.cred.xml`
 - Arista: `%USERPROFILE%\arista_kcl.cred.xml`
+- Cisco access switches: `%USERPROFILE%\cisco_access_admin.cred.xml`
 
 Do not commit or copy credential files into the project.
 
@@ -205,9 +206,11 @@ Important topology/reference additions:
 
 - `9F_BB_ARI_17.2 / 172.17.17.2` is confirmed by LLDP as the Arista 10G core on Cisco `Te1/3` and `Te1/4`.
 - `Po10` is the Cisco/Arista LACP bundle.
-- Cisco backbone CDP/LLDP neighbors with management IPs are included in inventory as Telnet read-only targets, pending credential confirmation where needed.
+- Cisco backbone CDP/LLDP neighbors with management IPs are included in inventory as Telnet read-only targets.
+- Cisco WS-C2960X access-neighbor credentials were confirmed by the management vendor and are mapped through logical credential ref `cisco_access_admin`.
+- Read-only `baseline` collection succeeded for the managed Cisco access neighbors from `Data_9F_99.250` through `Data_B2F_102.250`.
+- The Cisco access account lands in user exec (`>`), so Cisco `baseline` excludes `show running-config | include ^hostname`.
 - `Gi3/38` is the 9F computer room Cisco switch. It has no management IP configured and remains neighbor-only.
-- `172.16.102.250` is reachable on TCP/23, but tested stored credentials were rejected with `Login failed.`
 
 Operational decision:
 

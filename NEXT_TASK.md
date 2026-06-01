@@ -161,15 +161,18 @@ Verification:
 - Credential files are stored outside the repository:
   - `%USERPROFILE%\backbone_admin.cred.xml`
   - `%USERPROFILE%\arista_kcl.cred.xml`
+  - `%USERPROFILE%\cisco_access_admin.cred.xml`
 - The server process needs credential environment variables to collect live device data:
   - `NETWORK_AI_CREDENTIAL_BACKBONE_ADMIN`
   - `NETWORK_AI_CREDENTIAL_ARISTA_KCL`
+  - `NETWORK_AI_CREDENTIAL_CISCO_ACCESS_ADMIN`
 - Live collection should remain read-only and use only policy allowlisted purposes.
 - One-click CHECK currently runs fixed allowlisted purposes only: `interfaces`, `endpoints`, `topology`, `switching`.
 - `B1F_ARI_101.249` is inventory device `arista-b1f-3`.
 - Latest live CHECK for `arista-b1f-3` found low-speed ports including `Et4` at `a-100M` and `Et27` at `a-10M`; user-visible later output showed additional VLAN 101 low-speed ports. Re-check live before operational action.
-- Cisco access switches discovered from backbone neighbors are listed as Telnet targets, but credentials still need vendor confirmation.
-- `172.16.102.250` currently rejects the tested stored credentials despite TCP/23 being reachable.
+- Cisco access switches discovered from backbone neighbors use logical credential ref `cisco_access_admin`.
+- Cisco access-switch `baseline` collection succeeded for `Data_9F_99.250`, `Data_8F_88.250`, `Data_7F_77.250`, `Data_6F_66.250`, `Data_5F_55.250`, `Data_4F_44.250`, `Data_3F_33.250`, `Data_B1F_101.251`, and `Data_B2F_102.250`.
+- Cisco access-switch account lands in user exec (`>`), so Cisco `baseline` intentionally excludes `show running-config | include ^hostname`.
 
 ## High-Priority Follow-Ups
 
@@ -177,7 +180,6 @@ Verification:
 - Re-check `172.16.105.249 Ethernet6` error counter deltas.
 - Keep `172.16.105.249 Ethernet1` and `Ethernet15` as historical operator-confirmed shutdowns until live state is rechecked.
 - Add a known-risk refresh process so inventory/reference data does not drift from live observations.
-- Confirm correct credential set for Cisco access switches.
 - Keep `Gi3/38` neighbor-only until a management IP is configured.
 - Decide when to migrate Telnet to SSH/API.
 

@@ -31,7 +31,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(device.hostname, "Data_9F_99.250")
         self.assertEqual(device.management_ip, "172.16.99.250")
         self.assertEqual(device.access_method, "telnet")
-        self.assertEqual(device.credential_ref, "backbone_admin")
+        self.assertEqual(device.credential_ref, "cisco_access_admin")
 
     def test_1f_outpatient_inventory_keeps_reference_hostname(self) -> None:
         path = Path(__file__).resolve().parents[1] / "inventory" / "devices.csv"

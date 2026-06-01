@@ -118,6 +118,8 @@ Future LLM direction:
 - Added CHECK result formatting with per-port line breaks for low-speed/error findings.
 - Added Operations Search and Port Detail UI.
 - Added tests for parser, observation storage, search APIs, `/ask/plan` removal, and one-click CHECK.
+- Updated Cisco WS-C2960X backbone-neighbor inventory to use logical credential ref `cisco_access_admin`.
+- Removed `show running-config | include ^hostname` from Cisco `baseline` because the confirmed access-switch account lands in user exec (`>`) and cannot run that command reliably.
 
 ### Why It Changed
 
@@ -152,6 +154,16 @@ Confirmed examples:
     - `Et4`: connected, VLAN `101`, `a-100M`
     - `Et27`: connected, VLAN `101`, `a-10M`
   - Later user-visible output also showed multiple 100M/10M low-speed ports on VLAN `101`; the UI was updated to render each port on its own line.
+- Cisco WS-C2960X access-neighbor `baseline` collection completed successfully with `cisco_access_admin` for all currently managed floor switches:
+  - `cisco-9f-data` / `Data_9F_99.250` / `172.16.99.250`
+  - `cisco-8f-data` / `Data_8F_88.250` / `172.16.88.250`
+  - `cisco-7f-data` / `Data_7F_77.250` / `172.16.77.250`
+  - `cisco-6f-data` / `Data_6F_66.250` / `172.16.66.250`
+  - `cisco-5f-data` / `Data_5F_55.250` / `172.16.55.250`
+  - `cisco-4f-data` / `Data_4F_44.250` / `172.16.44.250`
+  - `cisco-3f-data` / `Data_3F_33.250` / `172.16.33.250`
+  - `cisco-b1f-data` / `Data_B1F_101.251` / `172.16.101.251`
+  - `cisco-b2f-data` / `Data_B2F_102.250` / `172.16.102.250`
 
 These are live read-only observations from collection time, not permanent network truth.
 
@@ -213,7 +225,7 @@ These are live read-only observations from collection time, not permanent networ
 
 - `Open` / `Plan only` neighbor actions were replaced by `Detail` and row-click behavior.
 - Double-click neighbor selection was replaced by single-click behavior.
-- Using existing `backbone_admin` and `arista_kcl.cred.xml` credentials against `172.16.102.250` failed with `Login failed.`
+- Using the older `backbone_admin` and `arista_kcl.cred.xml` credentials against `172.16.102.250` failed with `Login failed.` This was superseded by the confirmed `cisco_access_admin` credential.
 - Browser automation remained unreliable in the Windows sandbox; local HTTP, JS syntax checks, and unit tests were used instead.
 
 ### Decisions
@@ -254,7 +266,7 @@ Confirmed through docs and read-only checks:
 - Arista access switches are seeded in `inventory/devices.csv`.
 - Backbone neighbor reference is stored in `inventory/backbone_neighbors.json`.
 - `Gi3/38` is the 9F computer room Cisco switch, but it has no management IP configured and is not collect-capable.
-- `172.16.102.250` Telnet TCP/23 is reachable, but tested stored credentials were rejected.
+- Cisco WS-C2960X access switches from `Data_3F_33.250` through `Data_B2F_102.250` are reachable with the confirmed `admin` credential stored as logical ref `cisco_access_admin`.
 
 Known high-priority risks:
 
@@ -312,7 +324,7 @@ Result: passed.
 API health check:
 
 ```text
-GET http://127.0.0.1:8012/health
+GET http://127.0.0.1:8013/health
 ```
 
 Result:
@@ -327,6 +339,7 @@ UI/API checks also confirmed:
 - `GET /monitoring` returns the Monitoring page.
 - `POST /ask/plan` returns `404 Not Found`.
 - `POST /devices/{device_id}/check` works for read-only allowlisted CHECK when credentials are available.
+- `POST /devices/cisco-9f-data/collect/baseline` succeeds with `cisco_access_admin`.
 
 CLI command-plan check:
 
@@ -394,10 +407,10 @@ Current maintainability risks:
 The local FastAPI server was intentionally left running for the user:
 
 ```text
-http://127.0.0.1:8012/
+http://127.0.0.1:8013/
 ```
 
-At shutdown, port `8012` was listening with the latest source loaded.
+At shutdown, port `8013` was listening with the latest source loaded and the Cisco access credential env var present.
 
 Do not assume it will still be running in the next session. If needed, restart it with credential environment variables.
 
@@ -407,5 +420,6 @@ Example:
 $env:PYTHONPATH='src'
 $env:NETWORK_AI_CREDENTIAL_BACKBONE_ADMIN="$env:USERPROFILE\backbone_admin.cred.xml"
 $env:NETWORK_AI_CREDENTIAL_ARISTA_KCL="$env:USERPROFILE\arista_kcl.cred.xml"
-python -m uvicorn network_ai_mvp.api:create_app --factory --host 127.0.0.1 --port 8012
+$env:NETWORK_AI_CREDENTIAL_CISCO_ACCESS_ADMIN="$env:USERPROFILE\cisco_access_admin.cred.xml"
+python -m uvicorn network_ai_mvp.api:create_app --factory --host 127.0.0.1 --port 8013
 ```

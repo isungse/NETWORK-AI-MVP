@@ -15,7 +15,6 @@ READ_ONLY_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
         "baseline": (
             "terminal length 0",
             "show version",
-            "show running-config | include ^hostname",
             "show ip interface brief",
             "show interfaces description",
         ),
