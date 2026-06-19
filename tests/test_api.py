@@ -144,6 +144,59 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("password", self.audit_path.read_text(encoding="utf-8").lower())
         self.assertTrue(payload["observation_stored"])
 
+    def test_port_endpoints_collect_traces_mac_to_latest_stored_arp_ip(self) -> None:
+        raw_dir = self.data_dir / "raw" / "cisco-backbone"
+        raw_dir.mkdir(parents=True)
+        (raw_dir / "20260602T000000Z.json").write_text(
+            json.dumps(
+                {
+                    "stdout": (
+                        "===== show ip arp =====\n"
+                        "Internet  172.16.11.9  0  5c60.ba3c.725f  ARPA  Vlan11\n"
+                    )
+                }
+            ),
+            encoding="utf-8",
+        )
+        stdout = (
+            "===== show interfaces status =====\n"
+            "Port      Name               Status       Vlan       Duplex  Speed Type\n"
+            "Et29                         connected    11         a-full  a-1G  1000BASE-T\n"
+            "===== show interfaces description =====\n"
+            "Interface                      Status         Protocol Description\n"
+            "Et29                           up             up       Problem endpoint\n"
+            "===== show interfaces status =====\n"
+            "Port      Name               Status       Vlan       Duplex  Speed Type\n"
+            "Et29                         connected    11         a-full  a-1G  1000BASE-T\n"
+            "===== show mac address-table =====\n"
+            "Vlan    Mac Address       Type        Ports      Moves   Last Move\n"
+            "11      5c60.ba3c.725f    DYNAMIC     Et29       1       1 day, 3:10:37 ago\n"
+            "===== show ip arp =====\n"
+            "Address         Age (sec)  Hardware Addr   Interface\n"
+        )
+        app = create_app(
+            audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
+            executor=FakeExecutor(stdout=stdout),
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+        )
+        client = TestClient(app)
+
+        response = client.post("/devices/arista-1f-outpatient/collect/port-endpoints")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["purpose"], "port-endpoints")
+        row = payload["port_endpoint_trace"][0]
+        self.assertEqual(row["interface"], "Et29")
+        self.assertEqual(row["status"], "connected")
+        self.assertEqual(row["vlan"], "11")
+        self.assertEqual(row["speed"], "a-1G")
+        self.assertEqual(row["description"], "Problem endpoint")
+        self.assertEqual(row["endpoints"][0]["mac"], "5c60.ba3c.725f")
+        self.assertEqual(row["endpoints"][0]["ips"], ["172.16.11.9"])
+        self.assertNotIn("ago", {item["interface"] for item in payload["port_endpoint_trace"]})
+
     def test_ports_latest_and_search_use_stored_parsed_observation(self) -> None:
         stdout = (
             "===== show interfaces status =====\n"
@@ -220,6 +273,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn("Et6:", items["low_speed"]["detail"])
         self.assertIn("Et7:", items["low_speed"]["detail"])
         self.assertEqual(items["high_errors"]["status"], "warn")
+        self.assertEqual(items["uplink_lacp_trunk"]["status"], "not_evaluated")
+        self.assertIn("자동 판정 파서는 아직 구현되지 않아", items["uplink_lacp_trunk"]["detail"])
         self.assertEqual(items["ip_mac_port"]["status"], "ok")
         self.assertNotIn("credential_ref", response.text)
 

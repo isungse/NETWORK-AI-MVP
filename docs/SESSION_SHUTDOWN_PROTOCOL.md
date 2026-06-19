@@ -49,9 +49,9 @@ Expected findings are documentation references, redaction tests, and credential 
 4. Verify local API routes when server code changed.
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8012/health
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8012/
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8012/monitoring
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8013/health
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8013/
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8013/monitoring
 ```
 
 5. Update recovery documents.
@@ -70,9 +70,230 @@ git push origin main
 
 7. Leave the server state explicit.
 
-Record whether `http://127.0.0.1:8012/` is running. Do not assume it survives the next session.
+Record whether `http://127.0.0.1:8013/` is running. Do not assume it survives the next session.
 
-## Current Session Checkpoint - 2026-06-01
+## Current Session Checkpoint - 2026-06-19
+
+### What Changed
+
+Files and features:
+
+- `src/network_ai_mvp/policy.py`: added Arista read-only Purpose `security-logs`.
+- `scripts/backbone_telnet_readonly.ps1`: added optional `-EnableCredentialPath` support for explicitly approved privileged read-only checks.
+- `tests/test_policy.py`: added read-only policy coverage for `security-logs`.
+- `PROJECT_STATUS.md`, `NEXT_TASK.md`, `README.md`, and `docs/network/NETWORK_AI_MVP_HANDOFF.md`: updated session recovery, operational notes, and audit findings.
+
+Live read-only checks:
+
+- Confirmed 2F Arista SSH service on `172.16.105.249`, `172.16.105.247`, and `172.16.105.248` with banner `SSH-2.0-OpenSSH_7.8`.
+- Confirmed `kcl` starts in user exec mode and `show users` requires privileged mode.
+- Used stored local enable credential only after explicit user approval.
+- Ran privileged read-only `show users` and `show logging` on 2F Arista devices.
+- Ran read-only interface checks for suspected 2F link/physical issues.
+
+### Why It Changed
+
+- The user reported a wall-jack/PC-NIC unplugged symptom where the cable tester passed but the PC NIC did not link.
+- The user asked whether Arista switch-side problems were likely.
+- The user asked whether 2F Arista SSH was enabled.
+- The user asked whether external access or manipulation evidence existed.
+- The initial `show users` attempt failed because privileged mode was required.
+
+### How It Was Resolved
+
+- Kept all operations read-only.
+- Added only allowlisted `security-logs` commands:
+  - `terminal length 0`
+  - `show logging`
+  - `show users`
+- Added optional enable support to the Telnet helper without changing default behavior.
+- Used enable only for the approved read-only audit scope.
+- Filtered accessible logs for SSH/Telnet login, authentication, config, copy/write, username/account, and shutdown/no shutdown evidence.
+
+### Findings
+
+2F Arista SSH:
+
+```text
+172.16.105.249 SSH banner: SSH-2.0-OpenSSH_7.8
+172.16.105.247 SSH banner: SSH-2.0-OpenSSH_7.8
+172.16.105.248 SSH banner: SSH-2.0-OpenSSH_7.8
+```
+
+2F Arista current users at audit time:
+
+```text
+172.16.105.249: only kcl from 172.16.1.80
+172.16.105.247: only kcl from 172.16.1.80
+172.16.105.248: only kcl from 172.16.1.80
+```
+
+Accessible logs:
+
+```text
+External login evidence: not found
+Config/change evidence: not found
+copy/write evidence: not found
+username/account-change evidence: not found
+shutdown/no shutdown command evidence: not found
+```
+
+Audit limitation:
+
+```text
+Persistent logging: disabled
+Root login logging: disabled
+```
+
+Strict audit still requires central syslog and AAA/TACACS/RADIUS accounting.
+
+2F physical/link candidates:
+
+```text
+172.16.105.249 Et1  notconnect, historical FCS=368549, Rx=474389, Runts=105840
+172.16.105.247 Et25 notconnect, historical FCS=427407, Rx=528487, Runts=101080
+```
+
+### Failed Or Discarded
+
+- Direct `show users` through the normal non-enable API path failed with `privileged mode required`.
+- The first log-filtering PowerShell snippet used `$matches`, which collided with PowerShell's automatic regex variable. It was discarded and replaced with a non-conflicting local analysis.
+- No SSH executor migration was attempted in this session.
+- No configuration commands were run.
+
+### Decisions
+
+- Keep `security-logs` separate from `baseline`.
+- Keep enable support optional and explicit.
+- Do not use enable for any configuration/change operation without a separate approval workflow.
+- Continue to prefer read-only evidence and mark device buffer log limitations clearly.
+
+### Verification
+
+Latest completed verification:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest discover -s tests
+node --check src\network_ai_mvp\static\app.js
+node --check src\network_ai_mvp\static\monitoring.js
+```
+
+Results:
+
+```text
+Ran 40 tests
+OK
+```
+
+Secret scan:
+
+```powershell
+rg -n "password=|passwd|secret|\.cred\.xml|NETWORK_AI_CREDENTIAL|kcllove" .
+```
+
+Result: expected documentation references, redaction tests, credential environment variable names, and redaction code only. No plaintext device password was found.
+
+### Remaining Issues
+
+- Add parsed/UI summary for `security-logs`.
+- Decide whether to migrate 2F Arista devices from Telnet to SSH transport.
+- Confirm central syslog and AAA accounting availability.
+- Confirm wall-jack to switch-port mapping for the reported PC-NIC unplugged issue.
+- Re-check `172.16.105.247 Ethernet34` speed-misconfigured errdisable history.
+
+### Server State
+
+The local FastAPI server is running:
+
+```text
+http://127.0.0.1:8013/
+```
+
+Health check:
+
+```json
+{"status":"ok","mode":"read-only"}
+```
+
+## Previous Session Checkpoint - 2026-06-15
+
+### What Changed
+
+- No product code was changed during this session.
+- The local FastAPI server was started on `http://127.0.0.1:8013/` for testing.
+- `GET /health` returned `{"status":"ok","mode":"read-only"}`.
+- The main UI returned `200 OK` and exposed the Inventory/Search UI and `/monitoring` link.
+- The server was stopped at session end by user request.
+
+### Why It Changed
+
+- The user requested a session start check, then requested the local server to run.
+- The user then requested test completion, server shutdown, and session shutdown protocol execution.
+
+### How It Was Resolved
+
+- Started the FastAPI server with credential environment variables mapped to the existing local credential file paths.
+- Used port `8013` because it was available.
+- Verified `/health` and the main UI through HTTP requests.
+- Stopped server process `48956`.
+- Confirmed `http://127.0.0.1:8013/health` returned connection refused after shutdown.
+
+### Failed Or Discarded
+
+- Browser/Node-based verification was not usable because the Windows sandbox failed with `spawn setup refresh`.
+- PowerShell HTTP verification was used instead.
+- No live network collection was run.
+
+### Decisions
+
+- Leave the server stopped for session end.
+- Do not commit or push automatically; the working tree already contains the existing uncommitted implementation/documentation checkpoint.
+
+### Verification
+
+Latest completed verification:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest discover -s tests
+node --check src\network_ai_mvp\static\app.js
+node --check src\network_ai_mvp\static\monitoring.js
+```
+
+Results:
+
+```text
+Ran 39 tests
+OK
+```
+
+Secret scan:
+
+```powershell
+rg -n "password=|passwd|secret|\.cred\.xml|NETWORK_AI_CREDENTIAL|kcllove" .
+```
+
+Result: expected documentation references, redaction tests, credential environment variable names, and redaction code only. No plaintext device password was found.
+
+### Remaining Issues
+
+- Continue from the 2026-06-02 `port-endpoints` checkpoint.
+- Add a filter/search control inside `PORT ENDPOINT TRACE`.
+- Add CHECK row links to Port Detail for affected ports.
+- Add run-id history and source metadata for endpoint correlation.
+
+### Server State
+
+The local FastAPI server is stopped:
+
+```text
+http://127.0.0.1:8013/
+```
+
+At shutdown, `GET /health` returned connection refused after process `48956` was stopped.
+
+## Previous Session Checkpoint - 2026-06-01
 
 ### What Changed
 

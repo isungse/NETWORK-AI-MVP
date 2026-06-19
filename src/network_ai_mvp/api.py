@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import re
 from dataclasses import asdict
 from pathlib import Path
@@ -18,6 +19,14 @@ from .observations import (
     latest_ports,
     read_latest_observation,
     store_collection_observation,
+)
+from .parsers import (
+    command_sections,
+    interface_sort_key,
+    parse_interface_descriptions,
+    parse_interface_status,
+    parse_ip_arp,
+    parse_mac_address_table,
 )
 from .policy import CommandPolicyError, allowed_purposes, build_command_plan
 from .search import search_network_state
@@ -250,7 +259,7 @@ def create_app(
                 device=plan.device,
                 result=result,
             )
-        return {
+        response = {
             "device_id": result.device_id,
             "hostname": result.hostname,
             "management_ip": result.management_ip,
@@ -267,6 +276,9 @@ def create_app(
             "parsed_summary": observation.get("summary") if observation else {},
             "parsed_ports": observation.get("ports") if observation else [],
         }
+        if success and plan.purpose == "port-endpoints":
+            response["port_endpoint_trace"] = _build_port_endpoint_trace(result.stdout, data_dir)
+        return response
 
     @app.post("/devices/{device_id}/check")
     def device_check(device_id: str):
@@ -472,7 +484,7 @@ def _build_check_items(
         return [
             _check_item("low_speed", "저속 협상 포트 자동 탐지", "fail", message),
             _check_item("high_errors", "CRC/error 많은 포트 탐지", "fail", message),
-            _check_item("uplink_lacp_trunk", "uplink/LACP/trunk 이상 탐지", "fail", message),
+            _check_item("uplink_lacp_trunk", "uplink/LACP/trunk 자동 판정", "fail", message),
             _check_item("ip_mac_port", "IP-MAC-Port 자동 추적", "fail", message),
             _check_item("topology_mismatch", "구성도와 실제 연결 상태 불일치 탐지", "fail", message),
         ]
@@ -507,9 +519,9 @@ def _build_check_items(
         ),
         _check_item(
             "uplink_lacp_trunk",
-            "uplink/LACP/trunk 이상 탐지",
-            "unknown",
-            "read-only switching/topology 명령은 수집했지만, LACP/trunk 자동 판정 파서는 아직 MVP 범위 밖입니다.",
+            "uplink/LACP/trunk 자동 판정",
+            "not_evaluated",
+            "read-only switching/topology 명령은 수집했습니다. LACP/trunk 자동 판정 파서는 아직 구현되지 않아 정상/이상 여부를 판정하지 않았습니다.",
         ),
         _check_item(
             "ip_mac_port",
@@ -577,6 +589,80 @@ def _port_list(ports: list[object], *, include_errors: bool = False) -> str:
     if len(ports) > 12:
         rows.append(f"... 외 {len(ports) - 12}개")
     return "\n".join(rows)
+
+
+def _build_port_endpoint_trace(stdout: str, data_dir: str | Path) -> list[dict[str, object]]:
+    sections = command_sections(stdout)
+    status_rows = parse_interface_status(sections.get("show interfaces status", ""))
+    descriptions = parse_interface_descriptions(sections.get("show interfaces description", ""))
+    macs_by_port = parse_mac_address_table(sections.get("show mac address-table", ""))
+    ips_by_mac = _ips_by_mac_from_stdout(stdout)
+    for mac, ips in _latest_observation_ips_by_mac(data_dir).items():
+        ips_by_mac.setdefault(mac, set()).update(ips)
+
+    rows: list[dict[str, object]] = []
+    for port in sorted(macs_by_port, key=interface_sort_key):
+        status = status_rows.get(port, {})
+        endpoints = []
+        for mac in sorted(macs_by_port[port]):
+            endpoints.append(
+                {
+                    "mac": mac,
+                    "ips": tuple(sorted(ips_by_mac.get(mac, set()), key=_ip_sort_key)),
+                }
+            )
+        rows.append(
+            {
+                "interface": port,
+                "status": status.get("status") or "",
+                "vlan": status.get("vlan") or "",
+                "speed": status.get("speed") or "",
+                "description": descriptions.get(port, ""),
+                "endpoints": endpoints,
+            }
+        )
+    return rows
+
+
+def _latest_observation_ips_by_mac(data_dir: str | Path) -> dict[str, set[str]]:
+    raw_root = Path(data_dir) / "raw"
+    ips_by_mac: dict[str, set[str]] = {}
+    if not raw_root.exists():
+        return ips_by_mac
+
+    for device_dir in raw_root.iterdir():
+        if not device_dir.is_dir():
+            continue
+        raw_files = sorted(
+            (path for path in device_dir.glob("*.json") if path.is_file()),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for raw_file in raw_files:
+            try:
+                payload = json.loads(raw_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            stdout = str(payload.get("stdout") or "")
+            if "show ip arp" not in stdout:
+                continue
+            for mac, ips in _ips_by_mac_from_stdout(stdout).items():
+                ips_by_mac.setdefault(mac, set()).update(ips)
+            break
+    return ips_by_mac
+
+
+def _ips_by_mac_from_stdout(stdout: str) -> dict[str, set[str]]:
+    sections = command_sections(stdout)
+    ips_by_mac: dict[str, set[str]] = {}
+    for entry in parse_ip_arp(sections.get("show ip arp", "")):
+        ips_by_mac.setdefault(entry["mac"], set()).add(entry["ip"])
+    return ips_by_mac
+
+
+def _ip_sort_key(value: str) -> tuple[int, int, int, int]:
+    parts = [int(part) for part in str(value or "0.0.0.0").split(".") if part.isdigit()]
+    return tuple((parts + [0, 0, 0, 0])[:4])  # type: ignore[return-value]
 
 
 def _write_failure_audit(

@@ -369,7 +369,8 @@ tr.device-row.selected {
   border-left-color: var(--danger);
 }
 
-.check-item.unknown {
+.check-item.unknown,
+.check-item.not_evaluated {
   border-left-color: var(--muted);
 }
 

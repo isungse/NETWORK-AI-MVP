@@ -115,15 +115,19 @@ def parse_interface_descriptions(section: str) -> dict[str, str]:
     rows: dict[str, str] = {}
     for raw_line in section.splitlines():
         line = raw_line.rstrip()
-        if not line.strip() or line.lstrip().startswith("Interface ") or _is_prompt(line.strip()):
+        stripped = line.strip()
+        if (
+            not stripped
+            or stripped.lower() == "show interfaces description"
+            or line.lstrip().startswith("Interface ")
+            or _is_prompt(stripped)
+        ):
             continue
-        match = re.match(r"^(\S+)\s+(.+?)\s{2,}(.+?)\s{2,}(.*)$", line)
-        if match:
-            rows[short_interface_name(match.group(1))] = match.group(4).strip()
+        parts = stripped.split()
+        if len(parts) < 3:
             continue
-        fallback = re.match(r"^(\S+)\s+\S+\s+\S+\s*(.*)$", line.strip())
-        if fallback:
-            rows[short_interface_name(fallback.group(1))] = fallback.group(2).strip()
+        description_start = 4 if len(parts) >= 4 and parts[1].lower() == "admin" and parts[2].lower() == "down" else 3
+        rows[short_interface_name(parts[0])] = " ".join(parts[description_start:])
     return rows
 
 
@@ -154,10 +158,17 @@ def parse_mac_address_table(section: str) -> dict[str, set[str]]:
         line = raw_line.strip()
         if not line or _is_prompt(line):
             continue
-        match = re.search(r"\b([0-9a-f]{4}[.:-][0-9a-f]{4}[.:-][0-9a-f]{4})\b.*\s(\S+)$", line, re.I)
-        if not match or match.group(2).upper() == "CPU":
+        mac_match = re.search(r"\b([0-9a-f]{4}[.:-][0-9a-f]{4}[.:-][0-9a-f]{4})\b", line, re.I)
+        if not mac_match:
             continue
-        rows[short_interface_name(match.group(2))].add(canonical_mac(match.group(1)))
+        parts = line.split()
+        mac_index = next((index for index, part in enumerate(parts) if canonical_mac(part) == canonical_mac(mac_match.group(1))), -1)
+        if mac_index < 0:
+            continue
+        port = next((part for part in parts[mac_index + 1 :] if _looks_like_interface(part)), "")
+        if not port or port.upper() == "CPU":
+            continue
+        rows[short_interface_name(port)].add(canonical_mac(mac_match.group(1)))
     return dict(rows)
 
 
@@ -183,6 +194,7 @@ def parse_lldp_neighbors(section: str) -> dict[str, dict[str, str]]:
         line = raw_line.strip()
         if (
             not line
+            or line.lower() in {"show lldp neighbors", "show lldp neighbors detail"}
             or line.startswith(("Last table change", "Number of"))
             or "Neighbor Device ID" in line
             or _is_prompt(line)
@@ -250,3 +262,13 @@ def _int(value: str) -> int:
 
 def _is_prompt(line: str) -> bool:
     return line.endswith(">") or line.endswith("#")
+
+
+def _looks_like_interface(value: str) -> bool:
+    return bool(
+        re.match(
+            r"^(Et|Ethernet|Gi|GigabitEthernet|Te|TenGigabitEthernet|Fa|FastEthernet|Po|Port-channel|Port-Channel|Vl|Vlan|Ma)\S*$",
+            str(value or ""),
+            re.I,
+        )
+    ) or str(value or "").lower() == "switch"

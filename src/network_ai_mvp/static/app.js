@@ -250,7 +250,7 @@ function renderCheckResults(items) {
   const rows = items || [
     { label: "저속 협상 포트 자동 탐지", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
     { label: "CRC/error 많은 포트 탐지", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
-    { label: "uplink/LACP/trunk 이상 탐지", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
+    { label: "uplink/LACP/trunk 자동 판정", status: "not_evaluated", detail: "CHECK 실행 후 자동 판정 가능 여부가 표시됩니다." },
     { label: "IP-MAC-Port 자동 추적", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
     { label: "구성도와 실제 연결 상태 불일치 탐지", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
   ];
@@ -261,7 +261,7 @@ function renderCheckResults(items) {
 
     const statusNode = document.createElement("div");
     statusNode.className = "check-status";
-    statusNode.textContent = status;
+    statusNode.textContent = checkStatusLabel(status);
 
     const labelNode = document.createElement("div");
     labelNode.className = "check-label";
@@ -277,7 +277,11 @@ function renderCheckResults(items) {
 }
 
 function checkStatus(status) {
-  return ["ok", "warn", "fail", "unknown"].includes(status) ? status : "unknown";
+  return ["ok", "warn", "fail", "unknown", "not_evaluated"].includes(status) ? status : "unknown";
+}
+
+function checkStatusLabel(status) {
+  return status === "not_evaluated" ? "not evaluated" : status;
 }
 
 async function runSearch() {
@@ -478,12 +482,17 @@ function publishMonitoringResult(htmlValue, textValue) {
 function formatCollectionResultHtml(result) {
   const endpointSummary = formatEndpointIpSummary(result);
   const interfaceSummary = formatInterfaceFindingSummary(result);
+  const portEndpointTrace = formatPortEndpointTrace(result.port_endpoint_trace);
   const lines = [
     `Device: ${result.device_id} (${result.management_ip})`,
     `Purpose: ${result.purpose}`,
     `Result: ${result.success ? "success" : "failure"}    returncode=${text(result.returncode)}    stdout=${text(result.stdout_bytes)} bytes    stderr=${text(result.stderr_bytes)} bytes`,
     `Commands: ${Array.isArray(result.commands) ? result.commands.join(" | ") : "-"}`,
   ];
+
+  if (portEndpointTrace) {
+    lines.push("", "===== PORT ENDPOINT TRACE =====", portEndpointTrace);
+  }
 
   if (endpointSummary) {
     lines.push("", "===== CONNECTED ENDPOINTS =====", endpointSummary);
@@ -510,6 +519,26 @@ function formatCollectionResultHtml(result) {
   return colorizeStatusTokens(escapeHtml(lines.join("\n")));
 }
 
+function formatPortEndpointTrace(trace) {
+  if (!Array.isArray(trace) || !trace.length) {
+    return "";
+  }
+
+  const lines = [];
+  for (const row of trace) {
+    const endpoints = Array.isArray(row.endpoints) ? row.endpoints : [];
+    if (!endpoints.length) {
+      continue;
+    }
+    lines.push(`${row.interface || "-"}  ${row.status || "-"}/${row.speed || "-"}  vlan=${row.vlan || "-"}  ${row.description || "-"}`);
+    for (const endpoint of endpoints) {
+      const ips = Array.isArray(endpoint.ips) && endpoint.ips.length ? endpoint.ips.join(", ") : "-";
+      lines.push(`  - ip=${ips.padEnd(15)} mac=${endpoint.mac || "-"}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 function formatCheckResultHtml(result) {
   const device = result.device || {};
   const lines = [
@@ -523,7 +552,8 @@ function formatCheckResultHtml(result) {
   ];
 
   for (const item of result.check_items || []) {
-    lines.push(`[${String(item.status || "unknown").toUpperCase()}] ${item.label}: ${item.detail}`);
+    const status = String(item.status || "unknown").replaceAll("_", " ").toUpperCase();
+    lines.push(`[${status}] ${item.label}: ${item.detail}`);
   }
 
   if (Array.isArray(result.parsed_ports) && result.parsed_ports.length) {
@@ -812,18 +842,21 @@ function parseInterfaceDescriptions(section) {
   const rows = [];
   for (const line of section.split(/\r?\n/)) {
     const trimmed = line.trimEnd();
-    if (!trimmed || trimmed.startsWith("Interface ") || /[>#]\s*$/.test(trimmed)) {
+    const stripped = trimmed.trim();
+    if (!stripped || stripped.toLowerCase() === "show interfaces description" || stripped.startsWith("Interface ") || /[>#]\s*$/.test(stripped)) {
       continue;
     }
-    const match = trimmed.match(/^(\S+)\s+(\S+)\s+(\S+)\s*(.*)$/);
-    if (!match) {
+    const parts = stripped.split(/\s+/);
+    if (parts.length < 3) {
       continue;
     }
+    const adminDown = parts.length >= 4 && parts[1].toLowerCase() === "admin" && parts[2].toLowerCase() === "down";
+    const descriptionStart = adminDown ? 4 : 3;
     rows.push({
-      interfaceName: match[1],
-      status: match[2],
-      protocol: match[3],
-      description: match[4].trim(),
+      interfaceName: parts[0],
+      status: adminDown ? "admin down" : parts[1],
+      protocol: adminDown ? parts[3] : parts[2],
+      description: parts.slice(descriptionStart).join(" "),
     });
   }
   return rows;
@@ -832,17 +865,28 @@ function parseInterfaceDescriptions(section) {
 function parseMacAddressTable(section) {
   const rows = [];
   for (const line of section.split(/\r?\n/)) {
-    const match = line.match(/^\s*\S+\s+([0-9a-f]{4}[.:-][0-9a-f]{4}[.:-][0-9a-f]{4})\s+\S+.*\s+(\S+)\s*$/i);
-    if (!match || /^CPU$/i.test(match[2])) {
+    const macMatch = line.match(/\b([0-9a-f]{4}[.:-][0-9a-f]{4}[.:-][0-9a-f]{4})\b/i);
+    if (!macMatch) {
+      continue;
+    }
+    const parts = line.trim().split(/\s+/);
+    const macIndex = parts.findIndex((part) => canonicalMac(part) === canonicalMac(macMatch[1]));
+    const interfaceName = parts.slice(macIndex + 1).find((part) => looksLikeInterface(part));
+    if (!interfaceName || /^CPU$/i.test(interfaceName)) {
       continue;
     }
     rows.push({
-      mac: normalizeMac(match[1]),
-      macText: canonicalMac(match[1]),
-      interfaceName: match[2],
+      mac: normalizeMac(macMatch[1]),
+      macText: canonicalMac(macMatch[1]),
+      interfaceName,
     });
   }
   return rows;
+}
+
+function looksLikeInterface(value) {
+  return /^(Et|Ethernet|Gi|GigabitEthernet|Te|TenGigabitEthernet|Fa|FastEthernet|Po|Port-channel|Vl|Vlan|Ma)\S*$/i.test(String(value || "")) ||
+    String(value || "").toLowerCase() === "switch";
 }
 
 function parseIpArp(section) {

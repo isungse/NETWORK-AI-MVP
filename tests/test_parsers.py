@@ -27,11 +27,16 @@ Et52                           up             up                 Uplink to core
           Mac Address Table
 Vlan    Mac Address       Type        Ports
 22      b42e.9906.7712    DYNAMIC     Et6
+22      5c60.ba3c.725f    DYNAMIC     Et29       1       1 day, 3:10:37 ago
 22      e0d5.5e48.dd9e    DYNAMIC     Et2
 ===== show ip arp =====
 Address         Age (sec)  Hardware Addr   Interface
 172.16.22.153   0:01       b42e.9906.7712  Vlan22
 172.16.22.41    0:03       e0d5.5e48.dd9e  Vlan22
+===== show lldp neighbors =====
+show lldp neighbors
+Port Neighbor Device ID Neighbor Port ID TTL
+Et52 9F_BB_ARI_17.2 Ethernet9 120
 """
 
 
@@ -55,6 +60,10 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(by_port["Et6"]["runts"], 1841084)
         self.assertEqual(by_port["Et6"]["endpoint_ips"], ("172.16.22.153",))
         self.assertEqual(by_port["Et6"]["endpoint_macs"], ("b42e.9906.7712",))
+        self.assertEqual(by_port["Et29"]["endpoint_macs"], ("5c60.ba3c.725f",))
+        self.assertNotIn("ago", by_port)
+        self.assertNotIn("show", by_port)
+        self.assertEqual(by_port["Et52"]["neighbor_name"], "9F_BB_ARI_17.2")
         self.assertEqual(by_port["Et15"]["status"], "disabled")
         self.assertEqual(by_port["Et52"]["speed_mbps"], 10000)
 

@@ -7,7 +7,7 @@ Read-only foundation for a company network management AI agent.
 - Seed inventory from documented Cisco and Arista devices.
 - Allowlisted read-only command plans only.
 - Low-speed and interface error diagnostic rules.
-- Local FastAPI app and dense read-only web UI for inventory, command plans, collection metadata, diagnostics, and audit history.
+- Local FastAPI app and dense read-only web UI for inventory, command plans, collection metadata, diagnostics, endpoint lookup, and audit history.
 
 No configuration commands are implemented in this MVP foundation.
 
@@ -64,6 +64,8 @@ curl http://127.0.0.1:8000/devices
 curl http://127.0.0.1:8000/devices/arista-10g-core
 curl http://127.0.0.1:8000/vendors/arista/purposes
 curl http://127.0.0.1:8000/devices/arista-10g-core/command-plan/topology
+curl http://127.0.0.1:8000/devices/arista-1f-outpatient/command-plan/port-endpoints
+curl http://127.0.0.1:8000/devices/arista-2f-1/command-plan/security-logs
 curl http://127.0.0.1:8000/devices/arista-10g-core/diagnostics
 curl http://127.0.0.1:8000/audit-log
 ```
@@ -72,7 +74,27 @@ Live collection is also read-only and policy-limited, but it will open a device 
 
 ```powershell
 curl -X POST http://127.0.0.1:8000/devices/arista-10g-core/collect/baseline
+curl -X POST http://127.0.0.1:8000/devices/arista-1f-outpatient/collect/port-endpoints
+curl -X POST http://127.0.0.1:8000/devices/arista-2f-1/collect/security-logs
 ```
+
+Use Purpose `port-endpoints` when the operator needs to identify endpoint IP/MAC evidence for a problematic switch port. It uses only allowlisted read-only commands:
+
+- `terminal length 0`
+- `show interfaces status`
+- `show interfaces description`
+- `show mac address-table`
+- `show ip arp`
+
+The API response includes `port_endpoint_trace`, and the UI renders it as `PORT ENDPOINT TRACE` before raw stdout.
+
+Use Purpose `security-logs` for approved read-only Arista access/log review. It uses only:
+
+- `terminal length 0`
+- `show logging`
+- `show users`
+
+Some Arista commands such as `show users` may require privileged mode. The Telnet helper supports an optional encrypted enable credential path, but enable must be used only for explicitly approved read-only checks.
 
 Credential refs from `inventory/devices.csv` map to local encrypted credential file paths through environment variables. Do not put plaintext passwords or credential files in this repository.
 

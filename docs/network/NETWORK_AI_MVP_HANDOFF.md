@@ -88,6 +88,138 @@ Latest live CHECK observations captured during the 2026-06-01 session:
 
 These observations are collection-time evidence, not permanent truth.
 
+## Product Direction Update - 2026-06-02
+
+The port/device-centered operations console was extended with a dedicated endpoint-trace purpose.
+
+Decision:
+
+- Keep `baseline` focused on basic device/interface facts.
+- Keep `endpoints` for general endpoint collection.
+- Add `port-endpoints` for operator triage when a specific problematic port needs IP/MAC identification.
+- Keep all endpoint tracing read-only and allowlist-driven.
+
+Implementation status:
+
+- New Purpose: `port-endpoints`.
+- Allowed commands:
+  - `terminal length 0`
+  - `show interfaces status`
+  - `show interfaces description`
+  - `show mac address-table`
+  - `show ip arp`
+- API response includes `port_endpoint_trace`.
+- UI renders the trace as `PORT ENDPOINT TRACE` before raw stdout.
+- The trace groups endpoint evidence by interface and shows:
+  - interface
+  - connected/admin state when available
+  - VLAN
+  - speed
+  - description
+  - MAC
+  - correlated IPs
+- Arista MAC-table parsing was fixed so aging text such as `1 day ... ago` is not treated as an interface.
+- Endpoint IP enrichment can use recent stored ARP observations when the local switch ARP table does not contain the endpoint IP.
+
+Latest live `port-endpoints` observation captured during the 2026-06-02 session:
+
+- Device: `arista-1f-outpatient`
+- Inventory hostname: `4F_1F_ARI_104.259`
+- Management IP: `172.16.104.250`
+- Problem port: `Et29`
+- Port state at collection time: `connected`, VLAN `11`, speed `a-1G`
+- Endpoint MAC: `5c60.ba3c.725f`
+- Correlated endpoint IP: `172.16.11.9`
+
+Operator context:
+
+- `Et29` was investigated after high error counters were observed:
+  - `FCS=4348`
+  - `Rx=4396`
+  - `Runts=48`
+  - `Tx=0`
+- The local Arista ARP output only showed gateway-related ARP entries.
+- The endpoint IP was correlated by matching the Et29 MAC against recent stored ARP evidence, including backbone ARP observations.
+- This is collection-time evidence, not permanent truth. Re-check live state before contacting the endpoint owner or taking operational action.
+
+## Operational Audit Update - 2026-06-19
+
+The 2F Arista devices were checked with read-only commands after user approval.
+
+Devices:
+
+- `arista-2f-outpatient` / `4F_2F_ARI_105.249` / `172.16.105.249`
+- `arista-2f-1` / `2F_ARI_105.247` / `172.16.105.247`
+- `arista-2f-2` / `2F_ARI_105.248` / `172.16.105.248`
+
+SSH service check:
+
+- All three devices accepted TCP/22.
+- All three returned SSH banner `SSH-2.0-OpenSSH_7.8`.
+
+Credential/privilege finding:
+
+- `kcl` logs in to user exec first.
+- Privileged read-only commands required enable.
+- Enable credential was stored locally as `%USERPROFILE%\arista_enable.cred.xml`.
+- The PowerShell Telnet helper now supports optional `-EnableCredentialPath`; use it only for explicitly approved privileged read-only checks.
+
+Privileged read-only audit commands used:
+
+```text
+terminal length 0
+show users
+show logging
+```
+
+Current user evidence at collection time:
+
+```text
+172.16.105.249: only kcl from 172.16.1.80
+172.16.105.247: only kcl from 172.16.1.80
+172.16.105.248: only kcl from 172.16.1.80
+```
+
+Accessible log evidence:
+
+- No external SSH/Telnet login evidence was found in accessible `show logging` output.
+- No configuration/change evidence was found.
+- No `copy`, `write memory`, running-config/startup-config evidence was found.
+- No username/account-change evidence was found.
+- No shutdown/no shutdown command evidence was found.
+
+Audit limitation:
+
+```text
+Persistent logging: disabled
+Root login logging: disabled
+```
+
+Device buffer logs alone cannot prove long-term absence of access or manipulation. For strict audit, check central syslog and AAA/TACACS/RADIUS accounting.
+
+2F physical/link investigation:
+
+- User reported a wall jack where a cable tester showed normal but a PC NIC showed unplugged; the same cable worked on another wall jack.
+- Read-only interface checks suggest the issue is more likely physical path/switch-port mapping than PC NIC when the affected switch port remains `notconnect`.
+- Most suspicious candidates if they map to the reported wall jack:
+  - `172.16.105.249 / Et1`: `notconnect`, historical `FCS=368549`, `Rx=474389`, `Runts=105840`
+  - `172.16.105.247 / Et25`: `notconnect`, historical `FCS=427407`, `Rx=528487`, `Runts=101080`
+- Additional high-error/low-speed observations:
+  - `172.16.105.249 / Et6`: connected `a-100M`, `FCS=7846661`, `Rx=9687745`, `Runts=1841084`
+  - `172.16.105.249 / Et16`: connected `a-1G`, `FCS=802153`, `Rx=993962`, `Runts=191809`
+  - `172.16.105.248 / Et17`: connected `a-100M`, `FCS=880291`, `Rx=1115148`, `Runts=234857`
+  - `172.16.105.248 / Et22`: connected `a-10M half`, `Rx=29278`, `Runts=29278`
+
+2F Et11 finding:
+
+```text
+172.16.105.249 Et11 connected  vlan=22 speed=a-1G FCS=0 Rx=0 Runts=0 Tx=0
+172.16.105.247 Et11 notconnect vlan=22 speed=auto FCS=0 Rx=0 Runts=0 Tx=0
+172.16.105.248 Et11 notconnect vlan=22 speed=auto FCS=0 Rx=0 Runts=0 Tx=0
+```
+
+No 2F Et11 error-counter issue was observed at collection time.
+
 Future LLM direction:
 
 - LLM may be used only for controlled intent extraction and result summarization.

@@ -2,6 +2,7 @@ param(
   [string]$HostName = "172.16.1.1",
   [int]$Port = 23,
   [string]$CredentialPath = "$env:USERPROFILE\backbone_admin.cred.xml",
+  [string]$EnableCredentialPath = "",
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$Commands = @(
     "terminal length 0",
@@ -23,6 +24,14 @@ if (-not (Test-Path -LiteralPath $CredentialPath)) {
 $cred = Import-Clixml -LiteralPath $CredentialPath
 $user = $cred.UserName
 $password = $cred.GetNetworkCredential().Password
+$enablePassword = ""
+if ($EnableCredentialPath) {
+  if (-not (Test-Path -LiteralPath $EnableCredentialPath)) {
+    throw "Enable credential file not found: $EnableCredentialPath"
+  }
+  $enableCred = Import-Clixml -LiteralPath $EnableCredentialPath
+  $enablePassword = $enableCred.GetNetworkCredential().Password
+}
 
 $client = [System.Net.Sockets.TcpClient]::new()
 $client.ReceiveTimeout = 5000
@@ -150,6 +159,21 @@ try {
 
   if ($loginResult -match "(?i)password:|authentication failed|login invalid|incorrect|bad passwords?|access denied") {
     throw "Login failed."
+  }
+
+  if ($EnableCredentialPath -and $loginResult -match ">\s*$") {
+    Send-Line "enable"
+    $enablePrompt = Wait-For @("(?i)password:", "#\s*$", "(?i)authentication failed", "(?i)login invalid", "(?i)incorrect", "(?i)bad passwords?", "(?i)access denied") 10000
+    if ($enablePrompt -match "(?i)password:") {
+      Send-Line $enablePassword
+      $enableResult = Wait-For @("#\s*$", "(?i)authentication failed", "(?i)login invalid", "(?i)incorrect", "(?i)bad passwords?", "(?i)access denied") 10000
+      if ($enableResult -notmatch "#\s*$" -or $enableResult -match "(?i)authentication failed|login invalid|incorrect|bad passwords?|access denied") {
+        throw "Enable failed."
+      }
+    }
+    elseif ($enablePrompt -notmatch "#\s*$" -or $enablePrompt -match "(?i)authentication failed|login invalid|incorrect|bad passwords?|access denied") {
+      throw "Enable failed."
+    }
   }
 
   foreach ($cmd in $Commands) {

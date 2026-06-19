@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-06-01
+Last updated: 2026-06-19
 
 ## Project Goal
 
@@ -18,7 +18,7 @@ The SaaS/ERP/customer inventory/Chrome extension goals mentioned in the session 
 
 ## Current Implementation Status
 
-The MVP is usable as a local FastAPI web application at `http://127.0.0.1:8012/` when the server is running.
+The MVP is usable as a local FastAPI web application at `http://127.0.0.1:8013/` when the server is running.
 
 Implemented:
 
@@ -54,6 +54,10 @@ Current UI behavior:
 - `notconnect` is intentionally not colorized.
 - Purpose `endpoints` collects interface descriptions, MAC table, and ARP table separately from `baseline`.
 - Endpoint IP/MAC correlation is displayed under `CONNECTED ENDPOINTS` with one endpoint per line.
+- Purpose `port-endpoints` collects interface status, interface descriptions, MAC table, and ARP table to make per-port endpoint lookup easier.
+- `port-endpoints` adds a backend-built `PORT ENDPOINT TRACE` section before raw stdout, showing interface, connected status, VLAN, speed, MAC, and correlated IP when available.
+- Purpose `security-logs` collects Arista read-only operational/security log evidence with `show logging` and `show users`.
+- The Telnet helper supports an optional encrypted enable credential path for approved privileged read-only checks. It is used only when explicitly supplied.
 - Interface collections show a browser-side `INTERFACE FINDINGS` summary for connected low-speed ports, disabled ports, and high error counters before raw stdout.
 - Operations Search supports deterministic device, port, IP, MAC, and reference-neighbor lookup from inventory, stored parsed observations, and reference neighbor data.
 - Port Detail shows stored parsed status, VLAN, speed/duplex, endpoint IP/MAC, neighbor fields when available, error counters, source timestamp, and a neutral recent-history state.
@@ -94,7 +98,262 @@ Future LLM direction:
 - Commands must always come from backend allowlists.
 - User approval is still required before collection or any future change action.
 
-## Latest Session Checkpoint - 2026-06-01
+## Latest Session Checkpoint - 2026-06-19
+
+### What Changed
+
+- Added Arista read-only Purpose `security-logs`.
+  - `terminal length 0`
+  - `show logging`
+  - `show users`
+- Added optional `-EnableCredentialPath` support to `scripts/backbone_telnet_readonly.ps1`.
+- Verified that `kcl` logs into Arista user exec mode first, and privileged read-only checks require enable.
+- Confirmed SSH service is enabled on 2F Arista switches by TCP/22 and SSH banner.
+- Ran read-only interface checks on 2F Arista switches for suspected link/port issues.
+- Ran approved privileged read-only `show users` and `show logging` on 2F Arista switches.
+- Updated shutdown/recovery documentation to keep the session handoff aligned with Network AI MVP only.
+
+### Why It Changed
+
+- The user reported a 2F endpoint that showed unplugged on a PC NIC while a cable tester showed no fault.
+- The user asked whether Arista switch ports could be the cause.
+- The user asked whether 2F Arista SSH was configured.
+- The user asked whether there was evidence of external access or manipulation.
+- `show users` required privileged mode, so enable credential support was needed for approved read-only auditing.
+
+### Live Verification Notes
+
+2F Arista SSH availability:
+
+```text
+172.16.105.249 / 4F_2F_ARI_105.249 / SSH-2.0-OpenSSH_7.8
+172.16.105.247 / 2F_ARI_105.247    / SSH-2.0-OpenSSH_7.8
+172.16.105.248 / 2F_ARI_105.248    / SSH-2.0-OpenSSH_7.8
+```
+
+2F Arista Et11 read-only check:
+
+```text
+172.16.105.249 Et11 connected  vlan=22  speed=a-1G  FCS=0 Rx=0 Runts=0 Tx=0
+172.16.105.247 Et11 notconnect vlan=22  speed=auto  FCS=0 Rx=0 Runts=0 Tx=0
+172.16.105.248 Et11 notconnect vlan=22  speed=auto  FCS=0 Rx=0 Runts=0 Tx=0
+```
+
+2F Arista suspected physical/link issue candidates from read-only interface checks:
+
+```text
+172.16.105.249 Et1  notconnect, historical FCS=368549, Rx=474389, Runts=105840
+172.16.105.247 Et25 notconnect, historical FCS=427407, Rx=528487, Runts=101080
+```
+
+Other notable 2F high-error or low-speed observations:
+
+```text
+172.16.105.249 Et6  connected a-100M, FCS=7846661, Rx=9687745, Runts=1841084
+172.16.105.249 Et16 connected a-1G,   FCS=802153,  Rx=993962,  Runts=191809
+172.16.105.248 Et17 connected a-100M, FCS=880291,  Rx=1115148, Runts=234857
+172.16.105.248 Et22 connected a-10M half, Rx=29278, Runts=29278
+```
+
+Privileged read-only log audit:
+
+```text
+172.16.105.249 show users: only kcl from 172.16.1.80, the audit session.
+172.16.105.247 show users: only kcl from 172.16.1.80, the audit session.
+172.16.105.248 show users: only kcl from 172.16.1.80, the audit session.
+```
+
+Filtered `show logging` evidence:
+
+```text
+External SSH/Telnet login evidence: not found in accessible device logs.
+Configuration/change evidence: not found in accessible device logs.
+copy/write/startup-config/running-config evidence: not found in accessible device logs.
+username/account change evidence: not found in accessible device logs.
+shutdown/no shutdown command evidence: not found in accessible device logs.
+```
+
+Important limitation:
+
+```text
+Persistent logging: disabled
+Root login logging: disabled
+```
+
+Device buffer logs alone cannot prove long-term absence of access or manipulation. For strict audit, check central syslog and AAA/TACACS/RADIUS accounting.
+
+### Verification
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest discover -s tests
+node --check src\network_ai_mvp\static\app.js
+node --check src\network_ai_mvp\static\monitoring.js
+```
+
+Result:
+
+```text
+Ran 40 tests
+OK
+```
+
+Secret scan:
+
+```powershell
+rg -n "password=|passwd|secret|\.cred\.xml|NETWORK_AI_CREDENTIAL|kcllove" .
+```
+
+Result: expected documentation references, redaction tests, credential environment variable names, and redaction code only. No plaintext device password was found.
+
+Secret scan:
+
+```powershell
+rg -n "password=|passwd|secret|\.cred\.xml|NETWORK_AI_CREDENTIAL|kcllove" .
+```
+
+Result: expected documentation references, redaction tests, credential environment variable names, and redaction code only. No plaintext device password was found.
+
+### Open Follow-Ups
+
+- Decide whether to migrate 2F Arista collection from Telnet to SSH now that SSH service is confirmed.
+- Add first-class backend support for privileged read-only audit commands instead of only the PowerShell helper option.
+- Add security-log parsing/reporting so login/config evidence is summarized inside the UI.
+- Confirm central syslog and AAA accounting availability for stronger audit evidence.
+- Re-check physical cabling/patch-panel mapping for `172.16.105.249 Et1` and `172.16.105.247 Et25` if they match the reported wall jack.
+
+### Server State
+
+The local FastAPI server is running:
+
+```text
+http://127.0.0.1:8013/
+```
+
+Health check result:
+
+```json
+{"status":"ok","mode":"read-only"}
+```
+
+## Previous Session Checkpoint - 2026-06-15
+
+### What Changed
+
+- No product code was changed during this session.
+- The local FastAPI server was started for testing on `http://127.0.0.1:8013/`.
+- `GET /health` returned `{"status":"ok","mode":"read-only"}`.
+- The main UI returned `200 OK` and exposed the Inventory/Search UI and `/monitoring` link.
+- The server process was stopped at session end by user request.
+
+### Verification
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest discover -s tests
+node --check src\network_ai_mvp\static\app.js
+node --check src\network_ai_mvp\static\monitoring.js
+```
+
+Result:
+
+```text
+Ran 39 tests
+OK
+```
+
+Secret scan:
+
+```powershell
+rg -n "password=|passwd|secret|\.cred\.xml|NETWORK_AI_CREDENTIAL|kcllove" .
+```
+
+Result: expected documentation references, redaction tests, credential environment variable names, and redaction code only. No plaintext device password was found.
+
+### Server State
+
+The local FastAPI server is stopped. `http://127.0.0.1:8013/health` returned connection refused after shutdown.
+
+## Previous Session Checkpoint - 2026-06-02
+
+### What Changed
+
+- Added read-only Purpose `port-endpoints` for Cisco and Arista devices.
+- Added backend `port_endpoint_trace` output for `POST /devices/{device_id}/collect/port-endpoints`.
+- Added `PORT ENDPOINT TRACE` rendering in the Collection Result panel.
+- Added `show interfaces status` to the new `port-endpoints` purpose so the trace includes port state, VLAN, and speed.
+- Fixed Arista MAC address-table parsing so `Last Move ... ago` is not misread as an interface.
+- Fixed interface description parsing so empty Arista descriptions are not displayed as `up`.
+- Improved endpoint IP enrichment by using the latest stored raw observation that contains `show ip arp`, instead of assuming the newest file always contains ARP data.
+- Added tests for `port-endpoints` command planning, Arista MAC parsing, and Et29 MAC-to-IP trace correlation.
+
+### Why It Changed
+
+- The existing `endpoints` purpose could collect MAC/ARP data, but it was not optimized for quickly answering: "Which IP and MAC are connected to this problematic port?"
+- The Et29 investigation on `172.16.104.250` needed a concise port-centered view because raw baseline/endpoints output is too long for operational triage.
+- Arista MAC table output includes aging text after the port column; the previous parser could treat the trailing word `ago` as a port.
+
+### Live Verification Notes
+
+Read-only live collection was executed against:
+
+- `arista-1f-outpatient`
+- Hostname/inventory: `4F_1F_ARI_104.259`
+- Management IP: `172.16.104.250`
+
+Confirmed current Et29 endpoint evidence at collection time:
+
+```text
+Et29  connected/a-1G  vlan=11
+  - ip=172.16.11.9  mac=5c60.ba3c.725f
+```
+
+Context:
+
+- User identified `Et29` as a high-error concern on `4F_1F_ARI_104.259 / 172.16.104.250`.
+- Latest visible error evidence before this change:
+  - `Et29`: connected, VLAN `11`, speed `a-1G`
+  - `FCS=4348`, `Rx=4396`, `Runts=48`, `Tx=0`
+- The local Arista ARP table did not directly show the Et29 endpoint IP.
+- The endpoint IP was correlated through stored/latest backbone ARP evidence by MAC.
+- This is collection-time evidence and must be re-checked live before operational action.
+
+### Verification
+
+```powershell
+python -m unittest discover -s tests
+node --check src\network_ai_mvp\static\app.js
+node --check src\network_ai_mvp\static\monitoring.js
+```
+
+Result:
+
+```text
+Ran 39 tests
+OK
+```
+
+API health check:
+
+```text
+GET http://127.0.0.1:8013/health
+```
+
+Result:
+
+```json
+{"status":"ok","mode":"read-only"}
+```
+
+### Open Follow-Ups
+
+- Add a UI filter/search control inside `PORT ENDPOINT TRACE` so operators can jump directly to `Et29`, an IP, or a MAC inside large endpoint outputs.
+- Move CHECK result rows to clickable Port Detail links for affected ports.
+- Add endpoint pairing confidence labels when IP evidence comes from a different device's ARP observation.
+- Add run-id history so IP/MAC correlation can cite the exact observation source and timestamp.
+- Consider making `port-endpoints` the recommended workflow for single-port endpoint investigations.
+
+## Previous Session Checkpoint - 2026-06-01
 
 ### What Changed
 
@@ -299,7 +558,7 @@ Not implemented yet:
 
 ## Verification Results
 
-Latest local verification:
+Latest local verification as of 2026-06-02:
 
 ```powershell
 $env:PYTHONPATH='src'; python -m unittest discover -s tests
@@ -308,7 +567,7 @@ $env:PYTHONPATH='src'; python -m unittest discover -s tests
 Result:
 
 ```text
-Ran 38 tests
+Ran 39 tests
 OK
 ```
 
@@ -362,13 +621,13 @@ Result: includes Ethernet6, Ethernet1, Ethernet15, Telnet warning, and `Not live
 Last pushed commit:
 
 ```text
-2d7aea2 Add topology neighbors and monitoring view
+198b0d9 Confirm Cisco access switch credentials
 ```
 
-Working tree at latest pushed checkpoint:
+Working tree at latest checkpoint:
 
-- Not clean as of the 2026-06-01 session shutdown.
-- Multiple implementation and documentation changes are intentionally uncommitted.
+- Not clean as of the 2026-06-02 port-endpoints update.
+- Current uncommitted implementation/documentation changes include `port-endpoints`, `PORT ENDPOINT TRACE`, parser fixes, tests, and markdown updates.
 - Pre-existing dirty files from earlier work may still be present; do not revert without inspection.
 
 Ignored runtime artifacts:
@@ -404,15 +663,15 @@ Current maintainability risks:
 
 ## Server State
 
-The local FastAPI server was intentionally left running for the user:
+The local FastAPI server is currently stopped.
 
 ```text
 http://127.0.0.1:8013/
 ```
 
-At shutdown, port `8013` was listening with the latest source loaded and the Cisco access credential env var present.
+At the 2026-06-15 shutdown, port `8013` returned connection refused after stopping server process `48956`.
 
-Do not assume it will still be running in the next session. If needed, restart it with credential environment variables.
+If needed, restart it with credential environment variables.
 
 Example:
 
