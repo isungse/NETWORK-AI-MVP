@@ -27,18 +27,15 @@ SECRET_TEXT_MARKERS = (
     "passwd",
     "secret",
     "token",
-    "credential",
     "credential_ref",
     "credential path",
     "credential_path",
     "credential file",
     "credential_file",
-    "credentials",
 )
 
 ENV_CREDENTIAL_PATTERN = re.compile(r"NETWORK_AI_CREDENTIAL_[A-Z0-9_]+")
-WINDOWS_CREDENTIAL_FILE_PATTERN = re.compile(r"[A-Za-z]:\\[^\s'\"]*\.cred\.xml", re.IGNORECASE)
-PATH_LIKE_CREDENTIAL_PATTERN = re.compile(r"(?:[^\s'\"]*[\\/])?[^\s'\"]*(?:cred|credential)[^\s'\"]*", re.IGNORECASE)
+CREDENTIAL_FILE_PATTERN = re.compile(r"(?:[A-Za-z]:\\)?[^\s'\"]*\.cred\.xml", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -128,16 +125,15 @@ def redact_value(value: Any) -> Any:
 def redact_text(value: str) -> str:
     redacted = value
     redacted = ENV_CREDENTIAL_PATTERN.sub("[REDACTED]", redacted)
-    redacted = WINDOWS_CREDENTIAL_FILE_PATTERN.sub("[REDACTED_CREDENTIAL_FILE]", redacted)
+    redacted = CREDENTIAL_FILE_PATTERN.sub("[REDACTED_CREDENTIAL_FILE]", redacted)
     for marker in SECRET_TEXT_MARKERS:
         redacted = _redact_marker_and_value(redacted, marker)
-    redacted = PATH_LIKE_CREDENTIAL_PATTERN.sub("[REDACTED]", redacted)
     return redacted
 
 
 def _redact_marker_and_value(value: str, marker: str) -> str:
     pattern = re.compile(
-        rf"\b{re.escape(marker)}\b(?:\s*(?:=|:|is|for)?\s*['\"]?[^\s,'\"]+['\"]?)?",
+        rf"\b{re.escape(marker)}\b\s*(?:(?:=|:|is|for)\s*)?['\"]?[^\s,'\"]+['\"]?",
         re.IGNORECASE,
     )
     return pattern.sub("[REDACTED]", value)

@@ -79,6 +79,18 @@ class AuditTests(unittest.TestCase):
         self.assertNotIn(".cred.xml", value)
         self.assertNotIn("credential_ref", value)
 
+    def test_redaction_preserves_non_secret_credential_words(self) -> None:
+        value = redact_text("credentials confirmed for read-only collection; no credential value supplied")
+
+        self.assertIn("credentials confirmed", value)
+        self.assertIn("credential value supplied", value)
+
+    def test_redacts_relative_credential_file_without_masking_regular_words(self) -> None:
+        value = redact_text("use backbone_admin.cred.xml after credentials confirmed")
+
+        self.assertNotIn(".cred.xml", value)
+        self.assertIn("credentials confirmed", value)
+
 
 if __name__ == "__main__":
     unittest.main()

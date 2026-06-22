@@ -24,7 +24,7 @@ def parse_collection_ports(
     lldp_neighbors = parse_lldp_neighbors(sections.get("show lldp neighbors", ""))
 
     ports = set(status_rows) | set(descriptions) | set(counters) | set(mac_entries) | set(lldp_neighbors)
-    if not ports and not commands:
+    if not ports:
         return []
 
     ips_by_mac = defaultdict(set)
@@ -202,6 +202,8 @@ def parse_lldp_neighbors(section: str) -> dict[str, dict[str, str]]:
             continue
         parts = line.split()
         if len(parts) < 3:
+            continue
+        if not _looks_like_interface(parts[0]):
             continue
         local_port = short_interface_name(parts[0])
         rows[local_port] = {"neighbor_name": parts[1], "neighbor_platform": "", "neighbor_ip": ""}

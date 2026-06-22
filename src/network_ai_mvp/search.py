@@ -64,22 +64,23 @@ def search_network_state(
                     }
                 )
 
-    for neighbor in get_neighbors_for_device(backbone_neighbors_path, "cisco-backbone"):
-        neighbor_data = asdict(neighbor)
-        if _matches(normalized, " ".join(str(value or "") for value in neighbor_data.values())):
-            results.append(
-                {
-                    "type": "neighbor",
-                    "source": "reference_neighbor",
-                    "device_id": "cisco-backbone",
-                    "interface": short_interface_name(neighbor.local_interface),
-                    "label": f"cisco-backbone {short_interface_name(neighbor.local_interface)} -> {neighbor.neighbor_name}",
-                    "summary": (
-                        "Reference only. Re-check live CDP/LLDP before acting. "
-                        f"ip={neighbor.management_ip or '-'} platform={neighbor.platform or '-'}"
-                    ),
-                }
-            )
+    for device in devices:
+        for neighbor in get_neighbors_for_device(backbone_neighbors_path, device.device_id):
+            neighbor_data = asdict(neighbor)
+            if _matches(normalized, " ".join(str(value or "") for value in neighbor_data.values())):
+                results.append(
+                    {
+                        "type": "neighbor",
+                        "source": "reference_neighbor",
+                        "device_id": device.device_id,
+                        "interface": short_interface_name(neighbor.local_interface),
+                        "label": f"{device.device_id} {short_interface_name(neighbor.local_interface)} -> {neighbor.neighbor_name}",
+                        "summary": (
+                            "Reference only. Re-check live CDP/LLDP before acting. "
+                            f"ip={neighbor.management_ip or '-'} platform={neighbor.platform or '-'}"
+                        ),
+                    }
+                )
 
     return results[:50]
 

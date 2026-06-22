@@ -1,27 +1,135 @@
 [
   {
-    "source_device_id": "cisco-backbone",
-    "local_interface": "TenGigabitEthernet1/3",
-    "neighbor_name": "9F_BB_ARI_17.2",
-    "management_ip": "172.17.17.2",
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "B1F_ARI_101.247",
+    "management_ip": "172.16.101.247",
     "vendor": "arista",
-    "platform": "DCS-7050SX3-48YC8",
-    "remote_interface": "Ethernet47",
-    "discovery": "LLDP",
+    "platform": "DCS-7010TX-48F",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
     "status": "confirmed",
-    "notes": "LACP member of Port-channel10 to Arista 10G core."
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to B1F Arista switch. Confirm exact port names through live LLDP/CDP."
   },
   {
-    "source_device_id": "cisco-backbone",
-    "local_interface": "TenGigabitEthernet1/4",
-    "neighbor_name": "9F_BB_ARI_17.2",
-    "management_ip": "172.17.17.2",
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "B1F_ARI_101.248",
+    "management_ip": "172.16.101.248",
     "vendor": "arista",
-    "platform": "DCS-7050SX3-48YC8",
-    "remote_interface": "Ethernet48",
-    "discovery": "LLDP",
+    "platform": "DCS-7010TX-48F",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
     "status": "confirmed",
-    "notes": "LACP member of Port-channel10 to Arista 10G core."
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to B1F Arista switch. Confirm exact port names through live LLDP/CDP."
+  },
+  {
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "B1F_ARI_101.249",
+    "management_ip": "172.16.101.249",
+    "vendor": "arista",
+    "platform": "DCS-7010TX-48F",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
+    "status": "confirmed",
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to B1F Arista switch. Confirm exact port names through live LLDP/CDP."
+  },
+  {
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "4F_1F_ARI_104.259",
+    "management_ip": "172.16.104.250",
+    "vendor": "arista",
+    "platform": "DCS-7010TX-48-F",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
+    "status": "confirmed",
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to 1F Arista switch. Confirm exact port names through live LLDP/CDP."
+  },
+  {
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "1F_ARI_104.247",
+    "management_ip": "172.16.104.247",
+    "vendor": "arista",
+    "platform": "DCS-7010TX-48F",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
+    "status": "confirmed",
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to 1F Arista switch. Confirm exact port names through live LLDP/CDP."
+  },
+  {
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "1F_ARI_104.248",
+    "management_ip": "172.16.104.248",
+    "vendor": "arista",
+    "platform": "DCS-7010TX-48F",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
+    "status": "confirmed",
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to 1F Arista switch. Confirm exact port names through live LLDP/CDP."
+  },
+  {
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "4F_2F_ARI_105.249",
+    "management_ip": "172.16.105.249",
+    "vendor": "arista",
+    "platform": "DCS-7010TX-48-F",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
+    "status": "confirmed",
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to 2F Arista switch. Confirm exact port names through live LLDP/CDP."
+  },
+  {
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "2F_ARI_105.247",
+    "management_ip": "172.16.105.247",
+    "vendor": "arista",
+    "platform": "DCS-7010TX-48F",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
+    "status": "confirmed",
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to 2F Arista switch. Confirm exact port names through live LLDP/CDP."
+  },
+  {
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "2F_ARI_105.248",
+    "management_ip": "172.16.105.248",
+    "vendor": "arista",
+    "platform": "DCS-7010TX-48F",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
+    "status": "confirmed",
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to 2F Arista switch. Confirm exact port names through live LLDP/CDP."
+  },
+  {
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "4F_10G_UTP_1_17.3",
+    "management_ip": "172.17.17.3",
+    "vendor": "arista",
+    "platform": "DCS-7050TX3",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
+    "status": "confirmed",
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to 4F Arista 10G switch. Confirm exact port names through live LLDP/CDP."
+  },
+  {
+    "source_device_id": "arista-10g-core",
+    "local_interface": "Fiber uplink TBD",
+    "neighbor_name": "4F_10G_UTP_2.17.4",
+    "management_ip": "172.17.17.4",
+    "vendor": "arista",
+    "platform": "DCS-7050TX3",
+    "remote_interface": "Fiber uplink TBD",
+    "discovery": "operator-reference",
+    "status": "confirmed",
+    "notes": "Operator reference: 9F Arista 10G backbone optical uplink to 4F Arista 10G switch. Confirm exact port names through live LLDP/CDP."
   },
   {
     "source_device_id": "cisco-backbone",
@@ -33,7 +141,7 @@
     "remote_interface": "GigabitEthernet1/0/28",
     "discovery": "CDP",
     "status": "confirmed",
-    "notes": "Backbone floor switch neighbor."
+    "notes": "Cisco MAIN backbone floor switch neighbor."
   },
   {
     "source_device_id": "cisco-backbone",
@@ -45,7 +153,7 @@
     "remote_interface": "GigabitEthernet1/0/28",
     "discovery": "CDP",
     "status": "confirmed",
-    "notes": "Backbone floor switch neighbor."
+    "notes": "Cisco MAIN backbone floor switch neighbor."
   },
   {
     "source_device_id": "cisco-backbone",
@@ -57,7 +165,7 @@
     "remote_interface": "GigabitEthernet1/0/28",
     "discovery": "CDP/LLDP",
     "status": "confirmed",
-    "notes": "Backbone floor switch neighbor."
+    "notes": "Cisco MAIN backbone floor switch neighbor."
   },
   {
     "source_device_id": "cisco-backbone",
@@ -69,7 +177,7 @@
     "remote_interface": "GigabitEthernet1/0/28",
     "discovery": "CDP",
     "status": "confirmed",
-    "notes": "Backbone floor switch neighbor."
+    "notes": "Cisco MAIN backbone floor switch neighbor."
   },
   {
     "source_device_id": "cisco-backbone",
@@ -81,7 +189,7 @@
     "remote_interface": "GigabitEthernet1/0/28",
     "discovery": "CDP",
     "status": "confirmed",
-    "notes": "Backbone floor switch neighbor."
+    "notes": "Cisco MAIN backbone floor switch neighbor."
   },
   {
     "source_device_id": "cisco-backbone",
@@ -93,7 +201,7 @@
     "remote_interface": "GigabitEthernet1/0/28",
     "discovery": "CDP",
     "status": "confirmed",
-    "notes": "Backbone floor switch neighbor."
+    "notes": "Cisco MAIN backbone floor switch neighbor."
   },
   {
     "source_device_id": "cisco-backbone",
@@ -105,7 +213,7 @@
     "remote_interface": "GigabitEthernet1/0/28",
     "discovery": "CDP/LLDP",
     "status": "confirmed",
-    "notes": "Backbone floor switch neighbor."
+    "notes": "Cisco MAIN backbone floor switch neighbor."
   },
   {
     "source_device_id": "cisco-backbone",
@@ -117,7 +225,7 @@
     "remote_interface": "GigabitEthernet1/0/28",
     "discovery": "CDP",
     "status": "confirmed",
-    "notes": "Backbone floor switch neighbor."
+    "notes": "Cisco MAIN backbone floor switch neighbor."
   },
   {
     "source_device_id": "cisco-backbone",
@@ -129,7 +237,7 @@
     "remote_interface": "GigabitEthernet1/0/28",
     "discovery": "CDP",
     "status": "confirmed",
-    "notes": "Backbone floor switch neighbor."
+    "notes": "Cisco MAIN backbone floor switch neighbor."
   },
   {
     "source_device_id": "cisco-backbone",

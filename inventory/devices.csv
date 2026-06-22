@@ -1,6 +1,6 @@
 device_id,hostname,management_ip,vendor,platform,role,access_method,credential_ref,notes
 cisco-backbone,BACKBONE-SW,172.16.1.1,cisco,WS-C4503-E,backbone,telnet,backbone_admin,"SSH failed from management PC; Telnet succeeded; temporary insecure MVP access"
-arista-10g-core,9F_BB_ARI_17.2,172.17.17.2,arista,DCS-7050SX3-48YC8-F,10g-aggregation,telnet,arista_kcl,"Po10 to Cisco BACKBONE-SW Te1/3-Te1/4 via Et47-Et48"
+arista-10g-core,9F_BB_ARI_17.2,172.17.17.2,arista,DCS-7050SX3-48YC8-F,10g-backbone,telnet,arista_kcl,"Arista 10G backbone for B1F/1F/2F/4F Arista optical uplinks; 3F Arista excluded per operator clarification"
 arista-4f-10g-1,4F_10G_UTP_1_17.3,172.17.17.3,arista,DCS-7050TX3,10g-access,telnet,arista_kcl,"Confirmed by operator text; Telnet enabled for read-only MVP collection"
 arista-4f-10g-2,4F_10G_UTP_2.17.4,172.17.17.4,arista,DCS-7050TX3,10g-access,telnet,arista_kcl,"Confirmed by operator text; Telnet enabled for read-only MVP collection"
 arista-1f-outpatient,4F_1F_ARI_104.259,172.16.104.250,arista,DCS-7010TX-48-F,access,telnet,arista_kcl,"Hostname/IP mismatch likely naming issue; live observation reported hostname 4F_1F_ARI_104.250; all access ports VLAN 11"

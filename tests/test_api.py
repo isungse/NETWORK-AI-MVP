@@ -1,4 +1,5 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -43,6 +44,44 @@ class FakeExecutor:
         )
 
 
+class BatchFakeExecutor:
+    def __init__(self, *, stdout: str = "batched output", stderr: str = "", returncode: int = 0) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+        self.collect_calls = []
+        self.run_calls = []
+
+    def supports(self, device) -> bool:
+        return device.access_method == "telnet"
+
+    def collect(self, device, plans, *, credential_path):
+        self.collect_calls.append((device, tuple(plans), credential_path))
+        commands = []
+        seen = set()
+        for plan in plans:
+            for command in plan.commands:
+                if command not in seen:
+                    seen.add(command)
+                    commands.append(command)
+        return (
+            CommandResult(
+                device_id=device.device_id,
+                hostname=device.hostname,
+                management_ip=device.management_ip,
+                purpose="check",
+                commands=tuple(commands),
+                stdout=self.stdout,
+                stderr=self.stderr,
+                returncode=self.returncode,
+            ),
+        )
+
+    def run(self, plan, *, credential_path):
+        self.run_calls.append((plan, credential_path))
+        raise AssertionError("CHECK should use collect() when the executor provides it")
+
+
 @unittest.skipIf(TestClient is None, "FastAPI test dependencies are not installed")
 class ApiTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -76,9 +115,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(devices.status_code, 200)
         self.assertGreaterEqual(len(devices.json()), 2)
         self.assertNotIn("credential_ref", devices.json()[0])
+        self.assertIs(devices.json()[0]["collectable"], True)
         self.assertNotIn("credential_ref", devices.text)
         self.assertEqual(device.status_code, 200)
         self.assertEqual(device.json()["management_ip"], "172.17.17.2")
+        self.assertIs(device.json()["collectable"], True)
         self.assertNotIn("credential_ref", device.json())
         self.assertNotIn("credential_ref", device.text)
 
@@ -116,7 +157,7 @@ class ApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["device_id"], "cisco-backbone")
         names = {neighbor["neighbor_name"] for neighbor in payload["neighbors"]}
-        self.assertIn("9F_BB_ARI_17.2", names)
+        self.assertNotIn("9F_BB_ARI_17.2", names)
         self.assertIn("9F Computer Room Cisco Switch", names)
         computer_room = [
             neighbor
@@ -126,7 +167,89 @@ class ApiTests(unittest.TestCase):
         self.assertIsNone(computer_room["management_ip"])
         self.assertEqual(computer_room["status"], "ip-not-set")
 
+        arista_response = self.client.get("/devices/arista-10g-core/neighbors")
+        self.assertEqual(arista_response.status_code, 200)
+        arista_names = {neighbor["neighbor_name"] for neighbor in arista_response.json()["neighbors"]}
+        self.assertIn("B1F_ARI_101.247", arista_names)
+        self.assertIn("4F_10G_UTP_1_17.3", arista_names)
+        self.assertNotIn("3F_ARI_33.251", arista_names)
+
+    def test_topology_endpoint_returns_inventory_nodes_and_reference_edges(self) -> None:
+        response = self.client.get("/topology")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertGreaterEqual(payload["summary"]["devices"], 2)
+        self.assertGreaterEqual(payload["summary"]["reference_edges"], 1)
+        self.assertNotIn("credential_ref", response.text)
+
+        nodes = {node["id"]: node for node in payload["nodes"]}
+        self.assertIn("cisco-backbone", nodes)
+        self.assertIn("arista-10g-core", nodes)
+
+        cisco_to_arista_edges = [
+            edge
+            for edge in payload["edges"]
+            if edge["source_device_id"] == "cisco-backbone"
+            and edge["target_device_id"] == "arista-10g-core"
+            and edge["source_type"] == "reference"
+        ]
+        self.assertEqual(cisco_to_arista_edges, [])
+
+        arista_edges = [
+            edge
+            for edge in payload["edges"]
+            if edge["source_device_id"] == "arista-10g-core"
+            and edge["source_type"] == "reference"
+        ]
+        self.assertGreaterEqual(len(arista_edges), 10)
+        self.assertTrue(any(edge["target_device_id"] == "arista-b1f-1" for edge in arista_edges))
+        self.assertTrue(any(edge["target_device_id"] == "arista-4f-10g-1" for edge in arista_edges))
+        self.assertFalse(any(edge["target_device_id"] == "arista-3f" for edge in arista_edges))
+
+    def test_topology_endpoint_includes_live_neighbor_snapshot_edges(self) -> None:
+        observation_dir = self.data_dir / "observations" / "arista-10g-core"
+        observation_dir.mkdir(parents=True)
+        (observation_dir / "latest.json").write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-06-22T00:00:00Z",
+                    "purpose": "topology",
+                    "ports": [
+                        {
+                            "interface": "Et1",
+                            "status": "connected",
+                            "neighbor_name": "Data_B2F_102.250",
+                            "neighbor_ip": "172.16.102.250",
+                            "neighbor_platform": "WS-C2960X-24TS-L",
+                        }
+                    ],
+                    "summary": {"total_ports": 1},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        response = self.client.get("/topology")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        live_edges = [
+            edge
+            for edge in payload["edges"]
+            if edge["source_device_id"] == "arista-10g-core"
+            and edge["target_device_id"] == "cisco-b2f-data"
+            and edge["source_type"] == "live"
+        ]
+        self.assertTrue(live_edges)
+        self.assertEqual(live_edges[0]["status"], "live-managed")
+        self.assertEqual(live_edges[0]["local_interface"], "Et1")
+
     def test_collect_uses_mocked_executor_and_writes_audit_metadata(self) -> None:
+        initial_monitoring = self.client.get("/monitoring/latest")
+        self.assertEqual(initial_monitoring.status_code, 200)
+        self.assertFalse(initial_monitoring.json()["available"])
+
         response = self.client.post("/devices/arista-10g-core/collect/baseline")
 
         self.assertEqual(response.status_code, 200)
@@ -143,6 +266,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(audit_record["success"], True)
         self.assertNotIn("password", self.audit_path.read_text(encoding="utf-8").lower())
         self.assertTrue(payload["observation_stored"])
+        monitoring = self.client.get("/monitoring/latest")
+        self.assertTrue(monitoring.json()["available"])
+        self.assertEqual(monitoring.json()["device_id"], "arista-10g-core")
+        self.assertEqual(monitoring.json()["purpose"], "baseline")
+        self.assertIn("Device: arista-10g-core", monitoring.json()["text"])
 
     def test_port_endpoints_collect_traces_mac_to_latest_stored_arp_ip(self) -> None:
         raw_dir = self.data_dir / "raw" / "cisco-backbone"
@@ -278,6 +406,75 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(items["ip_mac_port"]["status"], "ok")
         self.assertNotIn("credential_ref", response.text)
 
+    def test_device_check_uses_batch_collect_when_available(self) -> None:
+        stdout = (
+            "===== show interfaces status =====\n"
+            "Port       Name   Status       Vlan     Duplex Speed  Type\n"
+            "Et6               connected    22       a-full a-100M 1000BASE-T\n"
+        )
+        executor = BatchFakeExecutor(stdout=stdout)
+        app = create_app(
+            audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
+            executor=executor,
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+        )
+        client = TestClient(app)
+
+        response = client.post("/devices/arista-2f-outpatient/check")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(executor.collect_calls), 1)
+        self.assertEqual(executor.run_calls, [])
+        payload = response.json()
+        self.assertEqual(payload["purpose"], "check")
+        self.assertIn("show interfaces status", payload["commands"])
+        self.assertTrue(payload["observation_stored"])
+
+    def test_collect_job_endpoint_enqueues_and_returns_status(self) -> None:
+        executor = BatchFakeExecutor(stdout="queued baseline output")
+        app = create_app(
+            audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
+            executor=executor,
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+        )
+        client = TestClient(app)
+
+        submitted = client.post("/devices/arista-10g-core/collect/baseline/jobs")
+
+        self.assertEqual(submitted.status_code, 200)
+        payload = submitted.json()
+        self.assertIn(payload["status"], {"queued", "running", "succeeded"})
+        self.assertEqual(payload["device_id"], "arista-10g-core")
+        self.assertEqual(payload["purposes"], ["baseline"])
+        status = client.get(f"/collection-jobs/{payload['job_id']}")
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["job_id"], payload["job_id"])
+
+    def test_check_job_endpoint_batches_allowed_purposes(self) -> None:
+        executor = BatchFakeExecutor(stdout="queued check output")
+        app = create_app(
+            audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
+            executor=executor,
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+        )
+        client = TestClient(app)
+
+        submitted = client.post("/devices/arista-2f-outpatient/check/jobs")
+
+        self.assertEqual(submitted.status_code, 200)
+        payload = submitted.json()
+        self.assertEqual(payload["device_id"], "arista-2f-outpatient")
+        self.assertEqual(payload["purposes"], ["interfaces", "endpoints", "topology", "switching"])
+        self.assertIn("show interfaces status", payload["commands"])
+
+    def test_unknown_collection_job_returns_404(self) -> None:
+        response = self.client.get("/collection-jobs/not-a-job")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_search_returns_reference_neighbor_without_live_truth_claim(self) -> None:
         response = self.client.get("/search?q=172.16.33.111")
 
@@ -349,6 +546,69 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("NETWORK_AI_CREDENTIAL_ARISTA_KCL", text)
         self.assertNotIn("credential_ref", text)
         self.assertNotIn("password", text.lower())
+
+    def test_collect_timeout_is_reported_without_traceback(self) -> None:
+        executor = FakeExecutor(error=subprocess.TimeoutExpired(cmd="powershell", timeout=120))
+        app = create_app(
+            audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
+            executor=executor,
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+        )
+        client = TestClient(app)
+
+        response = client.post("/devices/arista-10g-core/collect/baseline")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("timed out", response.json()["detail"])
+        self.assertNotIn("Traceback", response.text)
+        audit_record = json.loads(self.audit_path.read_text(encoding="utf-8"))
+        self.assertEqual(audit_record["success"], False)
+
+    def test_check_timeout_is_reported_without_traceback(self) -> None:
+        executor = FakeExecutor(error=subprocess.TimeoutExpired(cmd="powershell", timeout=120))
+        app = create_app(
+            audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
+            executor=executor,
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+        )
+        client = TestClient(app)
+
+        response = client.post("/devices/arista-10g-core/check")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("timed out", response.json()["detail"])
+        self.assertNotIn("Traceback", response.text)
+
+    def test_inventory_errors_are_translated_for_devices_and_search(self) -> None:
+        inventory_path = Path(self.temp_dir.name) / "broken_devices.csv"
+        inventory_path.write_text(
+            "\n".join(
+                [
+                    "device_id,hostname,management_ip,vendor,platform,role,access_method,credential_ref",
+                    "duplicate,switch-a,192.0.2.10,arista,7050,access,telnet,arista",
+                    "duplicate,switch-b,192.0.2.11,arista,7050,access,telnet,arista",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        app = create_app(
+            inventory_path=inventory_path,
+            audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
+            executor=self.executor,
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+        )
+        client = TestClient(app)
+
+        devices = client.get("/devices")
+        search = client.get("/search?q=duplicate")
+
+        self.assertEqual(devices.status_code, 503)
+        self.assertIn("Inventory unavailable", devices.json()["detail"])
+        self.assertEqual(search.status_code, 503)
+        self.assertIn("Inventory unavailable", search.json()["detail"])
 
     def test_collect_failure_summarizes_powershell_clixml_error(self) -> None:
         executor = FakeExecutor(

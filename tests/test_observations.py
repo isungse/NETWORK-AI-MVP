@@ -4,7 +4,12 @@ from pathlib import Path
 
 from network_ai_mvp.executor import CommandResult
 from network_ai_mvp.inventory import get_device, load_devices
-from network_ai_mvp.observations import find_latest_port, read_latest_observation, store_collection_observation
+from network_ai_mvp.observations import (
+    find_latest_port,
+    read_latest_observation,
+    read_observation_index,
+    store_collection_observation,
+)
 
 
 SAMPLE_STDOUT = """===== show interfaces status =====
@@ -46,6 +51,7 @@ class ObservationStoreTests(unittest.TestCase):
                 timestamp="2026-06-01T00:00:00Z",
             )
 
+            self.assertEqual(record["run_id"], "2026-06-01T00_00_00Z_interfaces")
             self.assertEqual(record["summary"]["low_speed_connected_ports"], 1)
             self.assertEqual(record["summary"]["disabled_ports"], 1)
             self.assertEqual(record["summary"]["high_error_ports"], 1)
@@ -59,6 +65,19 @@ class ObservationStoreTests(unittest.TestCase):
             self.assertIsNotNone(port)
             self.assertEqual(port["interface"], "Et6")
             self.assertEqual(port["endpoint_ips"], ["172.16.22.153"])
+            index = read_observation_index(temp_dir, device.device_id)
+            self.assertEqual(index[0]["run_id"], "2026-06-01T00_00_00Z_interfaces")
+            self.assertEqual(index[0]["purpose"], "interfaces")
+            self.assertEqual(index[0]["summary"]["high_error_ports"], 1)
+
+    def test_corrupt_latest_observation_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            latest_path = Path(temp_dir) / "observations" / "arista-2f-outpatient" / "latest.json"
+            latest_path.parent.mkdir(parents=True)
+            latest_path.write_text("{not-json", encoding="utf-8")
+
+            self.assertIsNone(read_latest_observation(temp_dir, "arista-2f-outpatient"))
+            self.assertIsNone(find_latest_port(temp_dir, "arista-2f-outpatient", "Et6"))
 
 
 if __name__ == "__main__":

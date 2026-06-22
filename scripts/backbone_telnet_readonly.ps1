@@ -1,7 +1,11 @@
 param(
-  [string]$HostName = "172.16.1.1",
+  [Parameter(Mandatory = $true)]
+  [ValidateNotNullOrEmpty()]
+  [string]$HostName,
   [int]$Port = 23,
-  [string]$CredentialPath = "$env:USERPROFILE\backbone_admin.cred.xml",
+  [Parameter(Mandatory = $true)]
+  [ValidateNotNullOrEmpty()]
+  [string]$CredentialPath,
   [string]$EnableCredentialPath = "",
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$Commands = @(

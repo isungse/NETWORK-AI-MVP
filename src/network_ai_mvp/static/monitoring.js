@@ -1,30 +1,52 @@
-const MONITORING_STORAGE_KEY = "networkAiMvp.collectionResult.v1";
-
 const nodes = {
   status: document.querySelector("#monitorStatus"),
   meta: document.querySelector("#monitorMeta"),
   result: document.querySelector("#monitorResult"),
 };
 
-function renderMonitoringResult() {
-  const raw = localStorage.getItem(MONITORING_STORAGE_KEY);
-  if (!raw) {
-    nodes.status.textContent = "Waiting for collection result...";
-    nodes.meta.textContent = "No result mirrored yet";
-    nodes.result.textContent = "Run Collect in the main UI to mirror the latest result here.";
+async function loadLatestMonitoringResult() {
+  const response = await fetch("/monitoring/latest", {
+    headers: { Accept: "application/json" },
+  });
+  const payload = await response.json();
+  renderMonitoringResult(payload);
+}
+
+function subscribeMonitoringEvents() {
+  if (!window.EventSource) {
+    nodes.status.textContent = "Server events are not supported by this browser.";
     return;
   }
 
-  try {
-    const payload = JSON.parse(raw);
-    nodes.result.innerHTML = payload.html || escapeHtml(payload.text || "");
-    nodes.status.textContent = "Mirroring latest Collection Result.";
-    nodes.meta.textContent = formatMeta(payload);
-  } catch {
-    nodes.status.textContent = "Monitoring data could not be parsed.";
-    nodes.meta.textContent = "Invalid local mirror data";
-    nodes.result.textContent = raw;
+  const events = new EventSource("/events/monitoring");
+  events.onopen = () => {
+    nodes.status.textContent = "Connected to server monitoring stream.";
+  };
+  events.onmessage = (event) => {
+    try {
+      renderMonitoringResult(JSON.parse(event.data));
+    } catch {
+      nodes.status.textContent = "Monitoring event could not be parsed.";
+      nodes.meta.textContent = "Invalid server event";
+      nodes.result.textContent = event.data;
+    }
+  };
+  events.onerror = () => {
+    nodes.status.textContent = "Waiting for server monitoring stream...";
+  };
+}
+
+function renderMonitoringResult(payload) {
+  if (!payload?.available) {
+    nodes.status.textContent = "Waiting for collection result...";
+    nodes.meta.textContent = "No server-side result yet";
+    nodes.result.textContent = payload?.text || "Run Collect or CHECK in the main UI to stream the latest result here.";
+    return;
   }
+
+  nodes.result.textContent = payload.text || "";
+  nodes.status.textContent = payload.success ? "Latest server collection succeeded." : "Latest server collection failed.";
+  nodes.meta.textContent = formatMeta(payload);
 }
 
 function formatMeta(payload) {
@@ -44,20 +66,8 @@ function formatMeta(payload) {
   return parts.length ? parts.join(" | ") : "No metadata";
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-window.addEventListener("storage", (event) => {
-  if (event.key === MONITORING_STORAGE_KEY) {
-    renderMonitoringResult();
-  }
+loadLatestMonitoringResult().catch((error) => {
+  nodes.status.textContent = "Monitoring snapshot could not be loaded.";
+  nodes.meta.textContent = error.message;
 });
-
-window.addEventListener("focus", renderMonitoringResult);
-renderMonitoringResult();
+subscribeMonitoringEvents();

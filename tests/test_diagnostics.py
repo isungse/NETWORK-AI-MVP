@@ -10,14 +10,14 @@ from network_ai_mvp.diagnostics import (
     summarize_findings,
 )
 from network_ai_mvp.inventory import get_device, load_devices
-from network_ai_mvp.models import InterfaceCounters, InterfaceObservation
+from network_ai_mvp.models import PortObservation
 
 
 class DiagnosticsTests(unittest.TestCase):
     def test_detects_low_speed_access_port(self) -> None:
         findings = detect_low_speed_ports(
             [
-                InterfaceObservation(
+                PortObservation(
                     device_id="arista-2f-outpatient",
                     interface="Ethernet1",
                     status="connected",
@@ -34,19 +34,19 @@ class DiagnosticsTests(unittest.TestCase):
     def test_detects_error_counters(self) -> None:
         findings = detect_error_counters(
             [
-                InterfaceCounters(
+                PortObservation(
                     device_id="arista-2f-outpatient",
                     interface="Ethernet1",
-                    input_errors=474389,
-                    crc_errors=368549,
+                    rx_errors=474389,
+                    fcs_errors=368549,
                     runts=105840,
-                    output_discards=28213216,
+                    tx_errors=28213216,
                 )
             ]
         )
 
         self.assertEqual(findings[0].severity, "critical")
-        self.assertIn("CRC=368549", findings[0].evidence)
+        self.assertIn("fcs_errors=368549", findings[0].evidence)
 
     def test_summarizes_no_findings(self) -> None:
         self.assertEqual(

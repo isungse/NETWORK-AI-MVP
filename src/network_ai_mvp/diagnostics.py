@@ -1,36 +1,44 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
+from typing import Any
 
-from .models import Device, DiagnosticFinding, InterfaceCounters, InterfaceObservation
+from .models import Device, DiagnosticFinding
+from .thresholds import (
+    HIGH_ERROR_COUNTER_FIELDS,
+    has_high_error_counters,
+    high_error_counter_value,
+    is_low_speed_connected_port,
+)
 
 DEFAULT_KNOWN_RISKS = Path(__file__).resolve().parents[2] / "inventory" / "known_risks.json"
 
 
 def detect_low_speed_ports(
-    observations: Iterable[InterfaceObservation],
-    *,
-    expected_access_speed_mbps: int = 1000,
+    observations: Iterable[object],
 ) -> list[DiagnosticFinding]:
     findings: list[DiagnosticFinding] = []
     for item in observations:
-        status = item.status.lower()
-        if item.is_uplink or "connected" not in status or "notconnect" in status:
+        row = _port_mapping(item)
+        if not row:
             continue
-        if item.speed_mbps is None or item.speed_mbps >= expected_access_speed_mbps:
+        if bool(row.get("is_uplink")) or not is_low_speed_connected_port(row):
             continue
 
+        speed_mbps = row.get("speed_mbps")
+        interface = str(row.get("interface") or "")
         findings.append(
             DiagnosticFinding(
                 severity="warning",
-                device_id=item.device_id,
-                interface=item.interface,
+                device_id=str(row.get("device_id") or ""),
+                interface=interface,
                 title="Low negotiated speed",
                 evidence=(
-                    f"{item.interface} is {item.status} at {item.speed_mbps}Mb/s "
-                    f"{item.duplex or 'unknown-duplex'}"
+                    f"{interface} is {row.get('status')} at {speed_mbps}Mb/s "
+                    f"{row.get('duplex') or 'unknown-duplex'}"
                 ),
                 next_step="Check cable, endpoint NIC settings, and interface error counters.",
             )
@@ -39,33 +47,22 @@ def detect_low_speed_ports(
 
 
 def detect_error_counters(
-    counters: Iterable[InterfaceCounters],
-    *,
-    crc_warning_threshold: int = 1,
-    input_error_warning_threshold: int = 1,
-    output_discard_warning_threshold: int = 1000,
+    counters: Iterable[object],
 ) -> list[DiagnosticFinding]:
     findings: list[DiagnosticFinding] = []
     for item in counters:
-        reasons: list[str] = []
-        if item.crc_errors >= crc_warning_threshold:
-            reasons.append(f"CRC={item.crc_errors}")
-        if item.input_errors >= input_error_warning_threshold:
-            reasons.append(f"input_errors={item.input_errors}")
-        if item.runts:
-            reasons.append(f"runts={item.runts}")
-        if item.output_discards >= output_discard_warning_threshold:
-            reasons.append(f"output_discards={item.output_discards}")
-
-        if not reasons:
+        row = _normalized_error_mapping(item)
+        if not row or not has_high_error_counters(row):
             continue
 
-        severity = "critical" if item.crc_errors or item.runts else "warning"
+        reasons = [f"{field}={int(row.get(field) or 0)}" for field in HIGH_ERROR_COUNTER_FIELDS if int(row.get(field) or 0)]
+
+        severity = "critical" if high_error_counter_value(row) >= 1000 else "warning"
         findings.append(
             DiagnosticFinding(
                 severity=severity,
-                device_id=item.device_id,
-                interface=item.interface,
+                device_id=str(row.get("device_id") or ""),
+                interface=str(row.get("interface") or ""),
                 title="Interface error counters present",
                 evidence=", ".join(reasons),
                 next_step="Re-check live counters, clear only with approval, then compare deltas after observation.",
@@ -230,3 +227,25 @@ def _optional_string(value: object) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _port_mapping(item: object) -> Mapping[str, Any] | None:
+    if isinstance(item, Mapping):
+        return item
+    if is_dataclass(item) and not isinstance(item, type):
+        return asdict(item)
+    return None
+
+
+def _normalized_error_mapping(item: object) -> dict[str, Any] | None:
+    row = _port_mapping(item)
+    if not row:
+        return None
+    normalized = dict(row)
+    if "fcs_errors" not in normalized and "crc_errors" in normalized:
+        normalized["fcs_errors"] = normalized.get("crc_errors")
+    if "rx_errors" not in normalized and "input_errors" in normalized:
+        normalized["rx_errors"] = normalized.get("input_errors")
+    if "tx_errors" not in normalized and "output_discards" in normalized:
+        normalized["tx_errors"] = normalized.get("output_discards")
+    return normalized

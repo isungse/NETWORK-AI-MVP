@@ -6,13 +6,14 @@
     <title>Network AI MVP</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body data-page="dashboard">
     <header class="topbar">
       <div class="topbar-title">
         <h1>Network AI MVP</h1>
         <p id="apiStatus" class="status-hidden">Checking API...</p>
       </div>
       <div class="topbar-actions">
+        <a class="monitor-link" href="/operations">Operations</a>
         <a class="monitor-link" href="/monitoring" target="_blank" rel="noreferrer">Monitoring</a>
         <div class="mode-stack" aria-label="Safety mode">
           <span class="mode-pill">READ-ONLY</span>
@@ -20,156 +21,30 @@
       </div>
     </header>
 
-    <main class="layout">
-      <section class="panel inventory-panel" aria-labelledby="inventoryTitle">
+    <main class="layout dashboard-only">
+      <section class="panel dashboard-panel" aria-labelledby="topologyTitle">
         <div class="panel-head">
-          <h2 id="inventoryTitle">Inventory</h2>
+          <div>
+            <h2 id="topologyTitle">Device Map</h2>
+            <span id="dashboardUpdated" class="muted">Loading device health...</span>
+          </div>
           <div class="panel-actions">
-            <button id="checkDevice" type="button" disabled>CHECK</button>
-            <button id="refreshDevices" type="button">Refresh</button>
+            <button id="dashboardShowAll" type="button">All Devices</button>
+            <button id="dashboardShowIssues" type="button">Issues Only</button>
           </div>
         </div>
-        <section class="subpanel search-panel" aria-labelledby="searchTitle">
-          <div class="subpanel-head">
-            <h3 id="searchTitle">Operations Search</h3>
-            <span class="muted">Device / port / IP / MAC</span>
-          </div>
-          <div class="search-row">
-            <label for="searchInput">Search</label>
-            <input id="searchInput" type="search" placeholder="Gi3/24, 172.16.33.111, 1c28.afc2.54ae" />
-            <button id="searchButton" type="button">Search</button>
-          </div>
-          <div class="table-wrap search-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Type</th>
-                  <th>Target</th>
-                  <th>Source</th>
-                  <th>Summary</th>
-                </tr>
-              </thead>
-              <tbody id="searchResultsBody"></tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="subpanel check-panel" aria-labelledby="checkTitle">
-          <div class="subpanel-head">
-            <h3 id="checkTitle">Network Check</h3>
-            <span class="muted">Read-only allowlist only</span>
-          </div>
-          <div id="checkResults" class="check-list"></div>
-        </section>
-
-        <div class="table-wrap inventory-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Device</th>
-                <th>Host</th>
-                <th>IP</th>
-                <th>Vendor</th>
-                <th>Role</th>
-                <th>Access</th>
-              </tr>
-            </thead>
-            <tbody id="devicesBody"></tbody>
-          </table>
-        </div>
-
-        <section class="subpanel neighbors-panel inventory-neighbors-panel" aria-labelledby="neighborsTitle">
-          <div class="subpanel-head">
-            <h3 id="neighborsTitle">Connected Neighbors</h3>
-            <span id="neighborsNote" class="muted">Reference only</span>
-          </div>
-          <div class="table-wrap neighbors-wrap">
-            <table class="neighbors-table">
-              <thead>
-                <tr>
-                  <th>Action</th>
-                  <th>Local Port</th>
-                  <th>Neighbor</th>
-                  <th>IP</th>
-                  <th>Vendor</th>
-                  <th>Platform</th>
-                  <th>Remote Port</th>
-                  <th>Status</th>
-                  <th>Source</th>
-                </tr>
-              </thead>
-              <tbody id="neighborsBody"></tbody>
-            </table>
-          </div>
-        </section>
+        <div id="topologyMap" class="topology-map"></div>
       </section>
 
-      <section class="panel detail-panel" aria-labelledby="detailTitle">
+      <section class="panel dashboard-diagnostic-panel" aria-labelledby="summaryTitle">
         <div class="panel-head">
-          <h2 id="detailTitle">Device Detail</h2>
-          <span id="selectedDeviceId" class="muted">No device selected</span>
-        </div>
-        <dl id="deviceFacts" class="facts"></dl>
-
-        <div class="control-row">
-          <label for="purposeSelect">Purpose</label>
-          <select id="purposeSelect" disabled></select>
-          <button id="loadPlan" type="button" disabled>Plan</button>
-          <button id="collect" type="button" disabled>Collect</button>
-        </div>
-
-        <div class="split">
-          <section class="subpanel" aria-labelledby="planTitle">
-            <h3 id="planTitle">Command Plan</h3>
-            <ol id="commandPlan" class="command-list"></ol>
-          </section>
-          <section class="subpanel" aria-labelledby="summaryTitle">
-            <h3 id="summaryTitle">Diagnostic Summary</h3>
-            <div id="diagnosticSummary" class="summary-box">Select a device.</div>
-            <div id="diagnosticFindings" class="finding-list"></div>
-          </section>
-        </div>
-
-        <section class="subpanel port-detail-panel" aria-labelledby="portDetailTitle">
-          <div class="subpanel-head">
-            <h3 id="portDetailTitle">Port Detail</h3>
-            <button id="diagnosePort" type="button" disabled>Diagnose This Port</button>
+          <div>
+            <h2 id="summaryTitle">Diagnostic Summary</h2>
+            <span id="selectedDeviceId" class="muted">Click a device on the map</span>
           </div>
-          <dl id="portDetailFacts" class="facts compact-facts"></dl>
-          <div id="portDetailState" class="summary-box">Search for a port, IP, MAC, or device to inspect stored parsed state.</div>
-        </section>
-
-      </section>
-
-      <section class="panel result-panel" aria-labelledby="resultTitle">
-        <div class="panel-head">
-          <h2 id="resultTitle">Collection Result</h2>
-          <span class="muted">Raw read-only command output</span>
         </div>
-        <pre id="collectionResult" class="result-box">No collection attempted.</pre>
-      </section>
-
-      <section class="panel audit-panel" aria-labelledby="auditTitle">
-        <div class="panel-head">
-          <h2 id="auditTitle">Audit Log</h2>
-          <button id="refreshAudit" type="button">Refresh</button>
-        </div>
-        <div class="table-wrap audit-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Device</th>
-                <th>IP</th>
-                <th>Purpose</th>
-                <th>Commands</th>
-                <th>Result</th>
-                <th>Error</th>
-              </tr>
-            </thead>
-            <tbody id="auditBody"></tbody>
-          </table>
-        </div>
+        <div id="diagnosticSummary" class="summary-box">Select a device on the map.</div>
+        <div id="diagnosticFindings" class="finding-list"></div>
       </section>
     </main>
 

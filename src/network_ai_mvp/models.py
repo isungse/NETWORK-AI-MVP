@@ -28,29 +28,6 @@ class CommandPlan:
 
 
 @dataclass(frozen=True)
-class InterfaceObservation:
-    device_id: str
-    interface: str
-    status: str
-    vlan: str | None
-    speed_mbps: int | None
-    duplex: str | None
-    description: str = ""
-    is_uplink: bool = False
-
-
-@dataclass(frozen=True)
-class InterfaceCounters:
-    device_id: str
-    interface: str
-    input_errors: int = 0
-    crc_errors: int = 0
-    runts: int = 0
-    output_discards: int = 0
-    link_status_changes: int = 0
-
-
-@dataclass(frozen=True)
 class PortObservation:
     device_id: str
     interface: str

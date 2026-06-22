@@ -1,15 +1,32 @@
 const state = {
   devices: [],
+  dashboardDevices: [],
+  topologyEdges: [],
+  topologySummary: {},
+  dashboardFilter: "all",
+  topologyFloorFilter: "all",
+  topologyVendorFilter: "all",
+  topologyTierFilter: "all",
+  topologyZoom: 1,
+  topologyAutoFit: false,
+  topologyStreamStarted: false,
+  topologyStreamStale: false,
   selectedDevice: null,
   selectedPurpose: "",
   latestPlan: null,
   selectedPort: null,
 };
 
-const MONITORING_STORAGE_KEY = "networkAiMvp.collectionResult.v1";
+const page = document.body.dataset.page || "operations";
 
 const nodes = {
   apiStatus: document.querySelector("#apiStatus"),
+  dashboardUpdated: document.querySelector("#dashboardUpdated"),
+  healthCards: document.querySelector("#healthCards"),
+  topologyMap: document.querySelector("#topologyMap"),
+  alarmFeed: document.querySelector("#alarmFeed"),
+  dashboardShowAll: document.querySelector("#dashboardShowAll"),
+  dashboardShowIssues: document.querySelector("#dashboardShowIssues"),
   devicesBody: document.querySelector("#devicesBody"),
   selectedDeviceId: document.querySelector("#selectedDeviceId"),
   deviceFacts: document.querySelector("#deviceFacts"),
@@ -35,13 +52,40 @@ const nodes = {
   refreshAudit: document.querySelector("#refreshAudit"),
 };
 
+const STATUS_COLOR = {
+  normal: "#639922",
+  ok: "#639922",
+  warning: "#EF9F27",
+  critical: "#E24B4A",
+  fault: "#E24B4A",
+  stale: "#888780",
+  unreachable: "#888780",
+};
+
+const TOPOLOGY_LAYOUT = {
+  nodeWidth: 220,
+  nodeHeight: 112,
+  nodeGap: 96,
+  tierRowGap: 48,
+  tierGap: 190,
+  paddingX: 64,
+  paddingY: 48,
+};
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { Accept: "application/json" },
     ...options,
   });
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch (error) {
+      payload = null;
+    }
+  }
   if (!response.ok) {
     const message = payload?.detail || `${response.status} ${response.statusText}`;
     throw new Error(message);
@@ -50,6 +94,9 @@ async function api(path, options = {}) {
 }
 
 function setStatus(message, ok = true) {
+  if (!nodes.apiStatus) {
+    return;
+  }
   nodes.apiStatus.textContent = message;
   nodes.apiStatus.className = ok ? "status-ok" : "status-fail";
 }
@@ -58,7 +105,14 @@ function text(value) {
   return value === null || value === undefined || value === "" ? "-" : String(value);
 }
 
+function isCollectable(device) {
+  return Boolean(device?.collectable);
+}
+
 function renderDevices() {
+  if (!nodes.devicesBody) {
+    return;
+  }
   nodes.devicesBody.replaceChildren();
   for (const device of state.devices) {
     const row = document.createElement("tr");
@@ -81,6 +135,12 @@ function renderDevices() {
 }
 
 function renderDeviceFacts(device) {
+  if (!nodes.selectedDeviceId || !nodes.deviceFacts) {
+    if (nodes.selectedDeviceId) {
+      nodes.selectedDeviceId.textContent = device ? device.device_id : "No device selected";
+    }
+    return;
+  }
   nodes.selectedDeviceId.textContent = device ? device.device_id : "No device selected";
   nodes.deviceFacts.replaceChildren();
   if (!device) {
@@ -109,7 +169,7 @@ function renderDeviceFacts(device) {
 async function loadDevices() {
   setStatus("Loading inventory...", true);
   state.devices = await api("/devices");
-  if (!state.selectedDevice && state.devices.length) {
+  if (!state.selectedDevice && state.devices.length && page !== "dashboard") {
     state.selectedDevice = state.devices[0];
   } else if (state.selectedDevice) {
     state.selectedDevice = state.devices.find((item) => item.device_id === state.selectedDevice.device_id) || null;
@@ -118,6 +178,7 @@ async function loadDevices() {
   renderDeviceFacts(state.selectedDevice);
   renderCheckResults(null);
   updateCheckButton();
+  await loadDashboard();
   await loadDiagnostics();
   await loadNeighbors();
   await loadPurposes();
@@ -126,10 +187,14 @@ async function loadDevices() {
 }
 
 async function selectDevice(deviceId) {
-  state.selectedDevice = state.devices.find((device) => device.device_id === deviceId) || null;
+  state.selectedDevice =
+    state.devices.find((device) => device.device_id === deviceId) ||
+    state.dashboardDevices.find((row) => row.device.device_id === deviceId)?.device ||
+    null;
   state.latestPlan = null;
   state.selectedPort = null;
   renderDevices();
+  renderDashboard();
   renderDeviceFacts(state.selectedDevice);
   renderCommandPlan(null);
   renderPortDetail(null);
@@ -142,10 +207,16 @@ async function selectDevice(deviceId) {
 }
 
 function updateCheckButton() {
-  nodes.checkDevice.disabled = !state.selectedDevice || state.selectedDevice.access_method !== "telnet";
+  if (!nodes.checkDevice) {
+    return;
+  }
+  nodes.checkDevice.disabled = !isCollectable(state.selectedDevice);
 }
 
 async function loadPurposes() {
+  if (!nodes.purposeSelect || !nodes.loadPlan || !nodes.collect) {
+    return;
+  }
   nodes.purposeSelect.replaceChildren();
   state.selectedPurpose = "";
   nodes.purposeSelect.disabled = true;
@@ -174,6 +245,9 @@ async function loadPurposes() {
 }
 
 async function loadCommandPlan() {
+  if (!nodes.collect) {
+    return;
+  }
   if (!state.selectedDevice || !state.selectedPurpose) {
     return;
   }
@@ -181,10 +255,13 @@ async function loadCommandPlan() {
     `/devices/${encodeURIComponent(state.selectedDevice.device_id)}/command-plan/${encodeURIComponent(state.selectedPurpose)}`,
   );
   renderCommandPlan(state.latestPlan);
-  nodes.collect.disabled = state.selectedDevice.access_method !== "telnet";
+  nodes.collect.disabled = !isCollectable(state.selectedDevice);
 }
 
 function renderCommandPlan(plan) {
+  if (!nodes.commandPlan) {
+    return;
+  }
   nodes.commandPlan.replaceChildren();
   if (!plan) {
     return;
@@ -197,10 +274,13 @@ function renderCommandPlan(plan) {
 }
 
 async function checkSelectedDevice() {
+  if (!nodes.checkDevice) {
+    return;
+  }
   if (!state.selectedDevice) {
     return;
   }
-  if (state.selectedDevice.access_method !== "telnet") {
+  if (!isCollectable(state.selectedDevice)) {
     renderCheckResults([{
       label: "CHECK",
       status: "fail",
@@ -241,11 +321,15 @@ async function checkSelectedDevice() {
   } finally {
     updateCheckButton();
     await loadAudit();
+    await loadDashboard();
     await loadDiagnostics();
   }
 }
 
 function renderCheckResults(items) {
+  if (!nodes.checkResults) {
+    return;
+  }
   nodes.checkResults.replaceChildren();
   const rows = items || [
     { label: "저속 협상 포트 자동 탐지", status: "unknown", detail: "CHECK를 실행하면 결과가 표시됩니다." },
@@ -285,6 +369,9 @@ function checkStatusLabel(status) {
 }
 
 async function runSearch() {
+  if (!nodes.searchInput || !nodes.searchResultsBody) {
+    return;
+  }
   const query = nodes.searchInput.value.trim();
   nodes.searchResultsBody.replaceChildren();
   if (!query) {
@@ -313,6 +400,9 @@ async function runSearch() {
 }
 
 function appendEmptySearchRow(message) {
+  if (!nodes.searchResultsBody) {
+    return;
+  }
   const row = document.createElement("tr");
   const cell = document.createElement("td");
   cell.colSpan = 4;
@@ -349,6 +439,10 @@ async function loadPortDetail(deviceId, interfaceName) {
 }
 
 function renderPortDetail(port, message = "Search for a port, IP, MAC, or device to inspect stored parsed state.") {
+  if (!nodes.portDetailFacts || !nodes.portDetailState || !nodes.diagnosePort) {
+    state.selectedPort = port;
+    return;
+  }
   state.selectedPort = port;
   nodes.portDetailFacts.replaceChildren();
   nodes.diagnosePort.disabled = !state.selectedDevice || !port;
@@ -386,6 +480,10 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
 }
 
 function renderReferencePortDetail(result) {
+  if (!nodes.portDetailFacts || !nodes.portDetailState || !nodes.diagnosePort) {
+    state.selectedPort = null;
+    return;
+  }
   state.selectedPort = null;
   nodes.portDetailFacts.replaceChildren();
   nodes.diagnosePort.disabled = !state.selectedDevice;
@@ -408,6 +506,9 @@ function renderReferencePortDetail(result) {
 }
 
 async function diagnoseSelectedPort() {
+  if (!nodes.purposeSelect || !nodes.collect) {
+    return;
+  }
   if (!state.selectedDevice) {
     return;
   }
@@ -427,10 +528,13 @@ function listText(values) {
 }
 
 async function collectSelected() {
+  if (!nodes.collect) {
+    return;
+  }
   if (!state.selectedDevice || !state.selectedPurpose) {
     return;
   }
-  if (state.selectedDevice.access_method !== "telnet") {
+  if (!isCollectable(state.selectedDevice)) {
     renderSummary("Collection is disabled until this device access method and credentials are verified.", "warn");
     return;
   }
@@ -452,31 +556,1011 @@ async function collectSelected() {
   } finally {
     nodes.collect.disabled = false;
     await loadAudit();
+    await loadDashboard();
     await loadDiagnostics();
   }
 }
 
+async function loadDashboard() {
+  if (nodes.dashboardUpdated) {
+    nodes.dashboardUpdated.textContent = "Loading topology and device health...";
+  }
+  nodes.healthCards?.replaceChildren();
+  nodes.topologyMap?.replaceChildren();
+  nodes.alarmFeed?.replaceChildren();
+
+  const topology = await api("/topology");
+  state.topologyEdges = Array.isArray(topology.edges) ? topology.edges : [];
+  state.topologySummary = topology.summary || {};
+  state.dashboardDevices = (topology.nodes || []).map((device) => ({
+    device,
+    findings: Array.isArray(device.findings) ? device.findings : [],
+    severity: device.severity || "info",
+    snapshotAvailable: !device.stale,
+    snapshotMessage: device.stale ? "No live parsed snapshot yet." : "",
+    loadError: "",
+  }));
+  renderDashboard();
+}
+
+function renderDashboard() {
+  renderHealthCards();
+  renderTopologyMap();
+  renderAlarmFeed();
+}
+
+function renderHealthCards() {
+  const rows = state.dashboardDevices;
+  const counts = {
+    critical: rows.filter((row) => row.severity === "critical").length,
+    warning: rows.filter((row) => row.severity === "warning").length,
+    stale: rows.filter((row) => !row.snapshotAvailable).length,
+    collectable: rows.filter((row) => isCollectable(row.device)).length,
+    total: rows.length,
+  };
+  const cards = [
+    ["critical", "장애", counts.critical, "critical"],
+    ["warning", "경고", counts.warning, "warning"],
+    ["stale", "Stale", counts.stale, "stale"],
+    ["collectable", "수집 가능", counts.collectable, "ok"],
+    ["total", "전체 장비", counts.total, "neutral"],
+  ];
+
+  if (!nodes.healthCards) {
+    const edgeCount = state.topologySummary.edges || state.topologyEdges.length;
+    if (nodes.dashboardUpdated) {
+      nodes.dashboardUpdated.textContent = `${counts.total} devices, ${edgeCount} links loaded. Click a node for diagnostics.`;
+    }
+    return;
+  }
+
+  nodes.healthCards.replaceChildren();
+  for (const [filter, label, count, tone] of cards) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `health-card ${tone}`;
+    button.dataset.filter = filter;
+    const activeFilter = filter === "total" ? "all" : filter;
+    button.setAttribute("aria-pressed", state.dashboardFilter === activeFilter ? "true" : "false");
+    button.addEventListener("click", () => {
+      state.dashboardFilter = filter === "total" ? "all" : filter;
+      state.topologyAutoFit = false;
+      state.topologyZoom = 1;
+      renderDashboard();
+    });
+
+    const value = document.createElement("span");
+    value.className = "health-card-value";
+    value.textContent = String(count);
+
+    const title = document.createElement("span");
+    title.className = "health-card-label";
+    title.textContent = label;
+
+    button.append(value, title);
+    nodes.healthCards.append(button);
+  }
+  const edgeCount = state.topologySummary.edges || state.topologyEdges.length;
+  nodes.dashboardUpdated.textContent = `${counts.total} devices, ${edgeCount} links loaded. Click a node or link for drill-down.`;
+}
+
+function renderTopologyMap() {
+  if (!nodes.topologyMap) {
+    return;
+  }
+  const rows = filteredDashboardRows();
+  nodes.topologyMap.replaceChildren();
+
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "dashboard-empty";
+    empty.textContent = "No devices match this dashboard filter.";
+    nodes.topologyMap.append(empty);
+    updateTopologyMapStatus(0, 0);
+    return;
+  }
+
+  const controls = createTopologyControls();
+  const viewport = document.createElement("div");
+  viewport.className = "topology-tree-viewport";
+  const canvas = document.createElement("div");
+  canvas.className = "topology-canvas topology-tree-canvas";
+  canvas.style.setProperty("--topology-zoom", String(state.topologyZoom));
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("topology-links");
+  svg.setAttribute("aria-label", "Hierarchical network topology links");
+  const nodeLayer = document.createElement("div");
+  nodeLayer.className = "topology-node-layer";
+
+  canvas.append(svg, nodeLayer);
+  viewport.append(canvas);
+  nodes.topologyMap.append(controls, viewport);
+  requestAnimationFrame(() => renderTopologyTree(viewport, canvas, svg, nodeLayer, rows));
+}
+
+function createDeviceNode(row) {
+  const button = document.createElement("button");
+  const status = dashboardStatus(row);
+  button.type = "button";
+  button.className = `device-node ${status}`;
+  button.dataset.nodeId = row.device.device_id;
+  button.title = `${row.device.hostname || row.device.device_id} · ${dashboardStatusLabel(row)}`;
+  button.addEventListener("click", () => openManagedDevice(row.device.device_id));
+  if (state.selectedDevice?.device_id === row.device.device_id) {
+    button.classList.add("selected");
+  }
+
+  const name = document.createElement("span");
+  name.className = "device-node-name";
+  name.textContent = row.device.hostname || row.device.device_id;
+
+  const meta = document.createElement("span");
+  meta.className = "device-node-meta";
+  meta.textContent = `${topologyTierLabel(topologyTier(row))} · ${row.device.vendor} · ${row.device.role}`;
+
+  const badge = document.createElement("span");
+  badge.className = "device-node-badge";
+  badge.textContent = dashboardStatusLabel(row);
+
+  const linkMeta = document.createElement("span");
+  linkMeta.className = "device-node-links";
+  linkMeta.textContent = linkSummary(row.device.device_id);
+
+  button.append(name, meta, badge, linkMeta);
+  return button;
+}
+
+function createTopologyControls() {
+  const controls = document.createElement("div");
+  controls.className = "topology-controls";
+
+  const title = document.createElement("span");
+  title.className = "topology-controls-title";
+  title.textContent = "Tree layout";
+
+  const stream = document.createElement("span");
+  stream.className = `topology-stream-state ${state.topologyStreamStale ? "stale" : "live"}`;
+  stream.textContent = state.topologyStreamStale ? "stream stale" : "stream ready";
+
+  const floorFilter = topologySelectControl(
+    "Floor",
+    state.topologyFloorFilter,
+    topologyFloorOptions(),
+    (value) => {
+      state.topologyFloorFilter = value;
+      state.topologyAutoFit = false;
+      state.topologyZoom = 1;
+      renderTopologyMap();
+    },
+  );
+  const vendorFilter = topologySelectControl(
+    "Vendor",
+    state.topologyVendorFilter,
+    topologyVendorOptions(),
+    (value) => {
+      state.topologyVendorFilter = value;
+      state.topologyAutoFit = false;
+      state.topologyZoom = 1;
+      renderTopologyMap();
+    },
+  );
+  const tierFilter = topologySelectControl(
+    "Tier",
+    state.topologyTierFilter,
+    topologyTierOptions(),
+    (value) => {
+      state.topologyTierFilter = value;
+      state.topologyAutoFit = false;
+      state.topologyZoom = 1;
+      renderTopologyMap();
+    },
+  );
+
+  const zoomOut = topologyControlButton("-", "Zoom out", () => {
+    state.topologyAutoFit = false;
+    state.topologyZoom = Math.max(0.5, Math.round((state.topologyZoom - 0.1) * 100) / 100);
+    renderTopologyMap();
+  });
+  const zoomIn = topologyControlButton("+", "Zoom in", () => {
+    state.topologyAutoFit = false;
+    state.topologyZoom = Math.min(1.6, Math.round((state.topologyZoom + 0.1) * 100) / 100);
+    renderTopologyMap();
+  });
+  const fit = topologyControlButton("Fit", "Fit topology to view", () => {
+    state.topologyAutoFit = true;
+    renderTopologyMap();
+  });
+  fit.setAttribute("aria-pressed", state.topologyAutoFit ? "true" : "false");
+
+  controls.append(title, stream, floorFilter, vendorFilter, tierFilter, zoomOut, zoomIn, fit);
+  return controls;
+}
+
+function topologySelectControl(labelText, value, options, onChange) {
+  const label = document.createElement("label");
+  label.className = "topology-filter";
+
+  const span = document.createElement("span");
+  span.textContent = labelText;
+
+  const select = document.createElement("select");
+  select.value = value;
+  for (const option of options) {
+    const item = document.createElement("option");
+    item.value = option.value;
+    item.textContent = option.label;
+    select.append(item);
+  }
+  select.value = value;
+  select.addEventListener("change", () => onChange(select.value));
+
+  label.append(span, select);
+  return label;
+}
+
+function topologyFloorOptions() {
+  const floors = new Set();
+  for (const row of state.dashboardDevices) {
+    const floor = topologyFloor(row);
+    if (floor) {
+      floors.add(floor);
+    }
+  }
+  return [
+    { value: "all", label: "All floors" },
+    ...Array.from(floors)
+      .sort(compareFloors)
+      .map((floor) => ({ value: floor, label: floor })),
+  ];
+}
+
+function topologyVendorOptions() {
+  const vendors = Array.from(new Set(state.dashboardDevices.map((row) => String(row.device.vendor || "").toLowerCase()).filter(Boolean)))
+    .sort();
+  return [
+    { value: "all", label: "All vendors" },
+    ...vendors.map((vendor) => ({ value: vendor, label: vendor.toUpperCase() })),
+  ];
+}
+
+function topologyTierOptions() {
+  return [
+    { value: "all", label: "All tiers" },
+    { value: "backbone", label: "Backbone" },
+    { value: "distribution", label: "Distribution" },
+    { value: "access", label: "Access" },
+  ];
+}
+
+function topologyControlButton(label, title, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "topology-control-button";
+  button.title = title;
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function renderTopologyTree(viewport, canvas, svg, nodeLayer, rows) {
+  const layout = layoutTopologyRows(rows, topologyMaxColumns(viewport));
+  const zoom = state.topologyAutoFit ? fitTopologyZoom(layout, viewport) : state.topologyZoom;
+  state.topologyZoom = zoom;
+  canvas.style.setProperty("--topology-zoom", String(zoom));
+  canvas.style.width = `${layout.width}px`;
+  canvas.style.height = `${layout.height}px`;
+  canvas.style.minWidth = `${layout.width}px`;
+  canvas.style.minHeight = `${layout.height}px`;
+  if (state.topologyAutoFit) {
+    viewport.scrollLeft = 0;
+    viewport.scrollTop = 0;
+  }
+  nodeLayer.replaceChildren();
+
+  for (const item of layout.nodes) {
+    const node = createDeviceNode(item.row);
+    node.classList.add("topology-tree-node");
+    node.style.left = `${item.x}px`;
+    node.style.top = `${item.y}px`;
+    node.style.width = `${TOPOLOGY_LAYOUT.nodeWidth}px`;
+    node.style.minHeight = `${TOPOLOGY_LAYOUT.nodeHeight}px`;
+    node.style.borderColor = STATUS_COLOR[dashboardStatus(item.row)] || STATUS_COLOR.stale;
+    nodeLayer.append(node);
+  }
+
+  renderTopologyLinks(svg, layout);
+  updateTopologyMapStatus(layout.nodes.length, layout.edges.length);
+}
+
+function fitTopologyZoom(layout, viewport) {
+  const availableWidth = Math.max(320, viewport.clientWidth - 18);
+  const availableHeight = Math.max(260, viewport.clientHeight - 18);
+  const widthZoom = availableWidth / Math.max(layout.width, 1);
+  const heightZoom = availableHeight / Math.max(layout.height, 1);
+  const zoom = Math.min(widthZoom, heightZoom, 1);
+  return Math.max(0.28, Math.floor(zoom * 100) / 100);
+}
+
+function topologyMaxColumns(viewport) {
+  const availableWidth = Math.max(360, viewport.clientWidth - TOPOLOGY_LAYOUT.paddingX * 2);
+  const unitWidth = TOPOLOGY_LAYOUT.nodeWidth + TOPOLOGY_LAYOUT.nodeGap;
+  const viewportColumns = Math.floor((availableWidth + TOPOLOGY_LAYOUT.nodeGap) / unitWidth);
+  return Math.max(2, Math.min(10, viewportColumns || 10));
+}
+
+function layoutTopologyRows(rows, maxColumns = 7) {
+  const tierOrder = ["backbone", "distribution", "access"];
+  const grouped = new Map(tierOrder.map((tier) => [tier, []]));
+  for (const row of rows) {
+    grouped.get(topologyTier(row)).push(row);
+  }
+  for (const tier of tierOrder) {
+    grouped.get(tier).sort(compareTopologyRows);
+  }
+
+  if (!grouped.get("distribution").length && grouped.get("backbone").length && grouped.get("access").length) {
+    return layoutParentGroupedTopologyRows(grouped);
+  }
+
+  const activeTiers = tierOrder.filter((tier) => grouped.get(tier).length);
+  const tierLayouts = activeTiers.map((tier) => topologyTierLayout(grouped.get(tier), maxColumns));
+  const tierWidth = Math.max(1, ...tierLayouts.map((layout) => layout.width));
+  const width = Math.max(1200, tierWidth + TOPOLOGY_LAYOUT.paddingX * 2);
+  const height =
+    TOPOLOGY_LAYOUT.paddingY * 2 +
+    tierLayouts.reduce((total, layout) => total + layout.height, 0) +
+    Math.max(0, activeTiers.length - 1) * TOPOLOGY_LAYOUT.tierGap;
+  const nodesById = new Map();
+  const positioned = [];
+  let tierY = TOPOLOGY_LAYOUT.paddingY;
+
+  activeTiers.forEach((tier, tierIndex) => {
+    const tierRows = grouped.get(tier);
+    const tierLayout = tierLayouts[tierIndex];
+    tierRows.forEach((row, index) => {
+      const tierRow = Math.floor(index / tierLayout.columns);
+      const column = index % tierLayout.columns;
+      const itemsInRow = Math.min(tierLayout.columns, tierRows.length - tierRow * tierLayout.columns);
+      const rowWidth = itemsInRow * TOPOLOGY_LAYOUT.nodeWidth + Math.max(0, itemsInRow - 1) * TOPOLOGY_LAYOUT.nodeGap;
+      const startX = (width - rowWidth) / 2;
+      const node = {
+        row,
+        tier,
+        rank: tierIndex,
+        x: startX + column * (TOPOLOGY_LAYOUT.nodeWidth + TOPOLOGY_LAYOUT.nodeGap),
+        y: tierY + tierRow * (TOPOLOGY_LAYOUT.nodeHeight + TOPOLOGY_LAYOUT.tierRowGap),
+      };
+      positioned.push(node);
+      nodesById.set(row.device.device_id, node);
+    });
+    tierY += tierLayout.height + TOPOLOGY_LAYOUT.tierGap;
+  });
+
+  return {
+    width,
+    height,
+    nodes: positioned,
+    nodesById,
+    edges: topologyVisibleEdges(nodesById),
+  };
+}
+
+function layoutParentGroupedTopologyRows(grouped) {
+  const backboneRows = grouped.get("backbone");
+  const accessRows = grouped.get("access");
+  const groupGap = 180;
+  const accessGroups = topologyAccessGroups(accessRows);
+  const groupColumns = accessGroups.length > 1 ? 2 : 3;
+  const groupLayouts = accessGroups.map((group) => ({
+    ...group,
+    layout: topologyTierLayout(group.rows, groupColumns),
+  }));
+  const accessWidth =
+    groupLayouts.reduce((total, group) => total + group.layout.width, 0) +
+    Math.max(0, groupLayouts.length - 1) * groupGap;
+  const width = Math.max(1320, accessWidth + TOPOLOGY_LAYOUT.paddingX * 2);
+  const backboneY = TOPOLOGY_LAYOUT.paddingY;
+  const accessY = backboneY + TOPOLOGY_LAYOUT.nodeHeight + TOPOLOGY_LAYOUT.tierGap;
+  const height =
+    accessY +
+    Math.max(TOPOLOGY_LAYOUT.nodeHeight, ...groupLayouts.map((group) => group.layout.height)) +
+    TOPOLOGY_LAYOUT.paddingY;
+  const nodesById = new Map();
+  const positioned = [];
+
+  let groupX = (width - accessWidth) / 2;
+  const groupCenters = new Map();
+  for (const group of groupLayouts) {
+    const center = groupX + group.layout.width / 2;
+    groupCenters.set(group.parentId, center);
+    positionTopologyGroup({
+      rows: group.rows,
+      columns: group.layout.columns,
+      groupWidth: group.layout.width,
+      startX: groupX,
+      startY: accessY,
+      tier: "access",
+      rank: 1,
+      positioned,
+      nodesById,
+    });
+    groupX += group.layout.width + groupGap;
+  }
+
+  const orderedBackbones = backboneRows.slice().sort(compareTopologyRows);
+  orderedBackbones.forEach((row, index) => {
+    const fallbackX =
+      (width - orderedBackbones.length * TOPOLOGY_LAYOUT.nodeWidth - Math.max(0, orderedBackbones.length - 1) * TOPOLOGY_LAYOUT.nodeGap) / 2 +
+      index * (TOPOLOGY_LAYOUT.nodeWidth + TOPOLOGY_LAYOUT.nodeGap);
+    const center = groupCenters.get(row.device.device_id);
+    const x = center ? center - TOPOLOGY_LAYOUT.nodeWidth / 2 : fallbackX;
+    const node = {
+      row,
+      tier: "backbone",
+      rank: 0,
+      x: Math.max(TOPOLOGY_LAYOUT.paddingX, Math.min(width - TOPOLOGY_LAYOUT.paddingX - TOPOLOGY_LAYOUT.nodeWidth, x)),
+      y: backboneY,
+    };
+    positioned.push(node);
+    nodesById.set(row.device.device_id, node);
+  });
+
+  return {
+    width,
+    height,
+    nodes: positioned,
+    nodesById,
+    edges: topologyVisibleEdges(nodesById),
+  };
+}
+
+function topologyAccessGroups(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const parentId = topologyPrimaryParent(row.device.device_id) || `vendor-${String(row.device.vendor || "other").toLowerCase()}`;
+    if (!groups.has(parentId)) {
+      groups.set(parentId, []);
+    }
+    groups.get(parentId).push(row);
+  }
+  return Array.from(groups.entries())
+    .map(([parentId, groupRows]) => ({
+      parentId,
+      rows: groupRows.slice().sort(compareTopologyRows),
+    }))
+    .sort((left, right) => topologyParentSortRank(left.parentId).localeCompare(topologyParentSortRank(right.parentId)));
+}
+
+function positionTopologyGroup({ rows, columns, groupWidth, startX, startY, tier, rank, positioned, nodesById }) {
+  rows.forEach((row, index) => {
+    const tierRow = Math.floor(index / columns);
+    const column = index % columns;
+    const itemsInRow = Math.min(columns, rows.length - tierRow * columns);
+    const rowWidth = itemsInRow * TOPOLOGY_LAYOUT.nodeWidth + Math.max(0, itemsInRow - 1) * TOPOLOGY_LAYOUT.nodeGap;
+    const rowStartX = startX + (groupWidth - rowWidth) / 2;
+    const node = {
+      row,
+      tier,
+      rank,
+      x: rowStartX + column * (TOPOLOGY_LAYOUT.nodeWidth + TOPOLOGY_LAYOUT.nodeGap),
+      y: startY + tierRow * (TOPOLOGY_LAYOUT.nodeHeight + TOPOLOGY_LAYOUT.tierRowGap),
+    };
+    positioned.push(node);
+    nodesById.set(row.device.device_id, node);
+  });
+}
+
+function topologyTierLayout(rows, maxColumns) {
+  const columns = Math.max(1, Math.min(maxColumns, rows.length || 1));
+  const rowCount = Math.max(1, Math.ceil((rows.length || 1) / columns));
+  return {
+    columns,
+    width: columns * TOPOLOGY_LAYOUT.nodeWidth + Math.max(0, columns - 1) * TOPOLOGY_LAYOUT.nodeGap,
+    height: rowCount * TOPOLOGY_LAYOUT.nodeHeight + Math.max(0, rowCount - 1) * TOPOLOGY_LAYOUT.tierRowGap,
+  };
+}
+
+function updateTopologyMapStatus(visibleDevices, visibleEdges) {
+  if (!nodes.dashboardUpdated) {
+    return;
+  }
+  const totalDevices = state.dashboardDevices.length;
+  const totalEdges = state.topologySummary.edges || state.topologyEdges.length;
+  const filters = activeTopologyFilterLabels();
+  const suffix = page === "dashboard" ? "Click a node for diagnostics." : "Click a node or link for drill-down.";
+  const filterText = filters.length ? ` Filter: ${filters.join(", ")}.` : "";
+  nodes.dashboardUpdated.textContent = `${visibleDevices}/${totalDevices} devices, ${visibleEdges}/${totalEdges} links shown.${filterText} ${suffix}`;
+}
+
+function activeTopologyFilterLabels() {
+  const labels = [];
+  if (state.dashboardFilter !== "all") {
+    labels.push(state.dashboardFilter === "issues" ? "issues" : state.dashboardFilter);
+  }
+  if (state.topologyFloorFilter !== "all") {
+    labels.push(state.topologyFloorFilter);
+  }
+  if (state.topologyVendorFilter !== "all") {
+    labels.push(state.topologyVendorFilter.toUpperCase());
+  }
+  if (state.topologyTierFilter !== "all") {
+    labels.push(topologyTierLabel(state.topologyTierFilter));
+  }
+  return labels;
+}
+
+function topologyVisibleEdges(nodesById) {
+  return state.topologyEdges
+    .filter((edge) => edge.source_device_id && edge.target_device_id)
+    .filter((edge) => nodesById.has(edge.source_device_id) && nodesById.has(edge.target_device_id));
+}
+
+function renderTopologyLinks(svg, layout) {
+  svg.replaceChildren();
+  svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
+  svg.setAttribute("width", String(layout.width));
+  svg.setAttribute("height", String(layout.height));
+
+  for (const edge of layout.edges) {
+    const endpoints = topologyEdgeEndpoints(edge, layout.nodesById);
+    if (!endpoints) {
+      continue;
+    }
+    const { source, target } = endpoints;
+    const geometry = topologyEdgeGeometry(source, target);
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const health = topologyEdgeHealth(edge);
+    path.classList.add("topology-link", edge.source_type === "live" ? "live" : "reference", `health-${health}`);
+    if (edge.link_type === "port-channel") {
+      path.classList.add("port-channel");
+    }
+    if (topologyEdgeIsStale(edge)) {
+      path.classList.add("stale");
+    }
+    path.setAttribute("d", geometry.path);
+    path.style.stroke = topologyEdgeColor(edge);
+    path.style.strokeWidth = String(topologyEdgeWidth(edge));
+    path.setAttribute("tabindex", "0");
+    path.setAttribute("role", "link");
+    path.setAttribute("aria-label", topologyEdgeLabel(edge));
+    path.addEventListener("click", () => openTopologyEdge(edge));
+    path.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openTopologyEdge(edge);
+      }
+    });
+
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = topologyEdgeLabel(edge);
+    path.append(title);
+    svg.append(path);
+  }
+}
+
+function compareTopologyRows(left, right) {
+  return topologySortKey(left).localeCompare(topologySortKey(right));
+}
+
+function topologySortKey(row) {
+  const deviceId = String(row.device.device_id || "");
+  if (deviceId === "cisco-backbone") {
+    return "00-cisco-main";
+  }
+  if (deviceId === "arista-10g-core") {
+    return "01-arista-10g";
+  }
+  const parent = topologyPrimaryParent(deviceId);
+  const floor = topologyFloor(row);
+  return `${topologyParentSortRank(parent)}-${floorRank(floor)}-${String(row.device.hostname || deviceId)}`;
+}
+
+function topologyPrimaryParent(deviceId) {
+  const incoming = state.topologyEdges.find((edge) => edge.target_device_id === deviceId && edge.source_device_id);
+  return incoming?.source_device_id || "";
+}
+
+function topologyParentSortRank(parentId) {
+  if (parentId === "cisco-backbone") {
+    return "00-cisco";
+  }
+  if (parentId === "arista-10g-core") {
+    return "01-arista";
+  }
+  if (parentId === "vendor-cisco") {
+    return "02-cisco-unlinked";
+  }
+  if (parentId === "vendor-arista") {
+    return "03-arista-unlinked";
+  }
+  return "09-other";
+}
+
+function topologyEdgeEndpoints(edge, nodesById) {
+  const source = nodesById.get(edge.source_device_id);
+  const target = nodesById.get(edge.target_device_id);
+  if (!source || !target) {
+    return null;
+  }
+  if (source.rank > target.rank) {
+    return { source: target, target: source };
+  }
+  return { source, target };
+}
+
+function topologyEdgeGeometry(source, target) {
+  if (source.rank === target.rank) {
+    const sourceBeforeTarget = source.x <= target.x;
+    const x1 = sourceBeforeTarget ? source.x + TOPOLOGY_LAYOUT.nodeWidth : source.x;
+    const x2 = sourceBeforeTarget ? target.x : target.x + TOPOLOGY_LAYOUT.nodeWidth;
+    const y1 = source.y + TOPOLOGY_LAYOUT.nodeHeight / 2;
+    const y2 = target.y + TOPOLOGY_LAYOUT.nodeHeight / 2;
+    const curve = Math.max(Math.abs(x2 - x1) * 0.35, 42);
+    const c1 = sourceBeforeTarget ? x1 + curve : x1 - curve;
+    const c2 = sourceBeforeTarget ? x2 - curve : x2 + curve;
+    return {
+      path: `M ${x1} ${y1} C ${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`,
+      labelX: (x1 + x2) / 2,
+      labelY: y1 - 12,
+    };
+  }
+
+  const x1 = source.x + TOPOLOGY_LAYOUT.nodeWidth / 2;
+  const y1 = source.y + TOPOLOGY_LAYOUT.nodeHeight;
+  const x2 = target.x + TOPOLOGY_LAYOUT.nodeWidth / 2;
+  const y2 = target.y;
+  const curve = Math.max(Math.abs(y2 - y1) * 0.45, 34);
+  return {
+    path: `M ${x1} ${y1} C ${x1} ${y1 + curve}, ${x2} ${y2 - curve}, ${x2} ${y2}`,
+    labelX: (x1 + x2) / 2,
+    labelY: (y1 + y2) / 2,
+  };
+}
+
+function topologyTier(row) {
+  const role = String(row.device.role || "").toLowerCase();
+  const hostname = String(row.device.hostname || "").toLowerCase();
+  if (role.includes("backbone") || role.includes("core") || hostname.includes("backbone")) {
+    return "backbone";
+  }
+  if (role.includes("aggregation") || role.includes("distribution") || role.includes("dist")) {
+    return "distribution";
+  }
+  return "access";
+}
+
+function topologyFloor(row) {
+  const values = [
+    row.device.hostname,
+    row.device.device_id,
+    row.device.notes,
+    row.device.management_ip,
+  ].map((value) => String(value || "").toUpperCase());
+  for (const value of values) {
+    const match = value.match(/\b(B\d+F|\d+F)\b/);
+    if (match) {
+      return match[1];
+    }
+  }
+  return "";
+}
+
+function compareFloors(left, right) {
+  return floorRank(left) - floorRank(right) || left.localeCompare(right);
+}
+
+function floorRank(floor) {
+  const basement = String(floor).match(/^B(\d+)F$/i);
+  if (basement) {
+    return -Number(basement[1]);
+  }
+  const above = String(floor).match(/^(\d+)F$/i);
+  if (above) {
+    return Number(above[1]);
+  }
+  return 999;
+}
+
+function topologyTierLabel(tier) {
+  return {
+    backbone: "Backbone/Core",
+    distribution: "L3 Distribution",
+    access: "L2 Access",
+  }[tier] || "Access";
+}
+
+function topologyEdgeHealth(edge) {
+  const memberStatuses = (Array.isArray(edge.members) ? edge.members : [])
+    .map((member) => String(member.status || "").toLowerCase())
+    .filter(Boolean);
+  if (state.topologyStreamStale || memberStatuses.some((status) => ["down", "disabled", "errdisabled"].includes(status))) {
+    return "fault";
+  }
+  if (!edge.target_device_id || String(edge.status || "").includes("unmanaged")) {
+    return "warning";
+  }
+  if (topologyEdgeIsStale(edge)) {
+    return "unreachable";
+  }
+  return "normal";
+}
+
+function topologyEdgeColor(edge) {
+  return STATUS_COLOR[topologyEdgeHealth(edge)] || STATUS_COLOR.unreachable;
+}
+
+function topologyEdgeWidth(edge) {
+  const utilization = Number(edge.metrics?.utilizationPct ?? edge.metrics?.utilization_pct ?? 0);
+  const clamped = Number.isFinite(utilization) ? Math.max(0, Math.min(100, utilization)) : 0;
+  const base = 2 + (clamped / 100) * 3;
+  if (edge.link_type === "port-channel" || (Array.isArray(edge.members) && edge.members.length > 1)) {
+    return Math.max(base, 4);
+  }
+  return base;
+}
+
+function topologyEdgeIsStale(edge) {
+  return state.topologyStreamStale || edge.source_type !== "live" || String(edge.status || "").includes("stale");
+}
+
+function topologyEdgeLabel(edge) {
+  return `${edge.source_device_id} ${edge.local_interface || ""} -> ${edge.target_device_id || edge.target_label || "unknown"} ${edge.remote_interface || ""} (${topologyEdgeHealth(edge)}, ${edge.source_type || "unknown"})`;
+}
+
+async function openTopologyEdge(edge) {
+  if (!edge.source_device_id) {
+    return;
+  }
+  await openManagedDevice(edge.source_device_id);
+  const interfaceName = String(edge.local_interface || "").split(",")[0].trim();
+  if (interfaceName) {
+    await loadPortDetail(edge.source_device_id, interfaceName);
+    document.querySelector(".port-detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+}
+
+function renderAlarmFeed() {
+  if (!nodes.alarmFeed) {
+    return;
+  }
+  const events = [];
+  for (const row of state.dashboardDevices) {
+    if (row.loadError) {
+      events.push({
+        severity: "critical",
+        deviceId: row.device.device_id,
+        title: "Dashboard data load failed",
+        detail: row.loadError,
+      });
+    }
+    for (const finding of row.findings) {
+      if (["warning", "critical"].includes(finding.severity)) {
+        events.push({
+          severity: finding.severity,
+          deviceId: row.device.device_id,
+          interface: finding.interface,
+          title: finding.title,
+          detail: finding.evidence,
+        });
+      }
+    }
+    if (!row.snapshotAvailable) {
+      events.push({
+        severity: "stale",
+        deviceId: row.device.device_id,
+        title: "No live snapshot",
+        detail: row.snapshotMessage || "Run CHECK or Collect to create a current parsed snapshot.",
+      });
+    }
+  }
+
+  for (const edge of state.topologyEdges) {
+    if (!edge.target_device_id && edge.status !== "reference-managed") {
+      events.push({
+        severity: edge.status === "ip-not-set" ? "warning" : "stale",
+        deviceId: edge.source_device_id,
+        interface: edge.local_interface,
+        title: "Unmanaged topology neighbor",
+        detail: `${edge.target_label || "unknown"} via ${edge.local_interface || "-"} (${edge.status || edge.source_type})`,
+      });
+    }
+  }
+
+  events.sort((left, right) => severityRank(right.severity) - severityRank(left.severity));
+  nodes.alarmFeed.replaceChildren();
+  if (!events.length) {
+    const empty = document.createElement("div");
+    empty.className = "dashboard-empty";
+    empty.textContent = "No actionable findings in the current snapshot.";
+    nodes.alarmFeed.append(empty);
+    return;
+  }
+
+  for (const event of events.slice(0, 30)) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `alarm-item ${event.severity}`;
+    item.addEventListener("click", async () => {
+      await openManagedDevice(event.deviceId);
+      if (event.interface) {
+        await loadPortDetail(event.deviceId, event.interface);
+      }
+    });
+
+    const title = document.createElement("span");
+    title.className = "alarm-title";
+    title.textContent = event.interface ? `${event.deviceId} ${shortInterfaceName(event.interface)}` : event.deviceId;
+
+    const detail = document.createElement("span");
+    detail.className = "alarm-detail";
+    detail.textContent = `${event.title}: ${event.detail}`;
+
+    const badge = document.createElement("span");
+    badge.className = "alarm-badge";
+    badge.textContent = event.severity;
+
+    item.append(title, detail, badge);
+    nodes.alarmFeed.append(item);
+  }
+}
+
+function filteredDashboardRows() {
+  const filter = state.dashboardFilter;
+  let rows = state.dashboardDevices;
+  if (filter === "all") {
+    rows = state.dashboardDevices;
+  } else if (filter === "critical" || filter === "warning") {
+    rows = state.dashboardDevices.filter((row) => row.severity === filter);
+  } else if (filter === "stale") {
+    rows = state.dashboardDevices.filter((row) => !row.snapshotAvailable);
+  } else if (filter === "collectable") {
+    rows = state.dashboardDevices.filter((row) => isCollectable(row.device));
+  } else {
+    rows = state.dashboardDevices.filter((row) => dashboardStatus(row) !== "ok");
+  }
+  return rows.filter(matchesTopologyFilters);
+}
+
+function matchesTopologyFilters(row) {
+  const vendor = String(row.device.vendor || "").toLowerCase();
+  if (state.topologyVendorFilter !== "all" && vendor !== state.topologyVendorFilter) {
+    return false;
+  }
+
+  const tier = topologyTier(row);
+  if (state.topologyTierFilter !== "all" && tier !== state.topologyTierFilter) {
+    return false;
+  }
+
+  if (state.topologyFloorFilter === "all") {
+    return true;
+  }
+
+  return topologyFloor(row) === state.topologyFloorFilter || (state.topologyTierFilter === "all" && tier === "backbone");
+}
+
+function dashboardStatus(row) {
+  if (row.loadError) {
+    return "critical";
+  }
+  if (row.severity === "critical" || row.severity === "warning") {
+    return row.severity;
+  }
+  if (!row.snapshotAvailable) {
+    return "stale";
+  }
+  return "ok";
+}
+
+function dashboardStatusLabel(row) {
+  const status = dashboardStatus(row);
+  if (status === "ok") {
+    return "normal";
+  }
+  if (status === "stale") {
+    return "stale";
+  }
+  return status;
+}
+
+function severityRank(severity) {
+  return { critical: 4, warning: 3, stale: 2, info: 1, ok: 0 }[severity] || 0;
+}
+
+function linkSummary(deviceId) {
+  const outgoing = state.topologyEdges.filter((edge) => edge.source_device_id === deviceId).length;
+  const incoming = state.topologyEdges.filter((edge) => edge.target_device_id === deviceId).length;
+  if (!outgoing && !incoming) {
+    return "links: none";
+  }
+  return `links: ${outgoing} out / ${incoming} in`;
+}
+
+function linkLabel(edge) {
+  const local = String(edge.local_interface || "").split(",")[0].trim();
+  const remote = String(edge.remote_interface || "").split(",")[0].trim();
+  if (local && remote) {
+    return `${local} -> ${remote}`;
+  }
+  return local || remote || edge.source_type || "link";
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) {
+    return CSS.escape(value);
+  }
+  return String(value).replace(/["\\]/g, "\\$&");
+}
+
+function startTopologyStream() {
+  if (state.topologyStreamStarted || !window.EventSource) {
+    return;
+  }
+  state.topologyStreamStarted = true;
+  const events = new EventSource("/events/monitoring");
+  events.onopen = () => {
+    state.topologyStreamStale = false;
+    if (state.dashboardDevices.length) {
+      renderDashboard();
+    }
+  };
+  events.onmessage = (event) => {
+    try {
+      applyTopologyMonitoringPatch(JSON.parse(event.data));
+    } catch {
+      // Drop malformed stream frames; the next valid frame will refresh state.
+    }
+  };
+  events.onerror = () => {
+    state.topologyStreamStale = true;
+    if (state.dashboardDevices.length) {
+      renderDashboard();
+    }
+  };
+}
+
+function applyTopologyMonitoringPatch(payload) {
+  if (!payload?.available || !payload.device_id) {
+    return;
+  }
+  const row = state.dashboardDevices.find((item) => item.device.device_id === payload.device_id);
+  if (!row) {
+    return;
+  }
+  row.snapshotAvailable = Boolean(payload.success);
+  row.snapshotMessage = payload.success ? "" : "Latest server-side collection failed.";
+  if (payload.success === false) {
+    row.severity = "critical";
+    row.findings = [
+      {
+        severity: "critical",
+        title: "Collection failed",
+        evidence: "Latest server-side collection event reported failure.",
+      },
+      ...row.findings,
+    ];
+  }
+  for (const edge of state.topologyEdges) {
+    if (edge.source_device_id === payload.device_id || edge.target_device_id === payload.device_id) {
+      edge.metrics = { ...(edge.metrics || {}), stale: !payload.success };
+    }
+  }
+  state.topologyStreamStale = false;
+  renderDashboard();
+}
+
 function setCollectionResultText(value) {
+  if (!nodes.collectionResult) {
+    return;
+  }
   nodes.collectionResult.textContent = value;
-  publishMonitoringResult(nodes.collectionResult.innerHTML, nodes.collectionResult.textContent);
 }
 
 function setCollectionResultHtml(value) {
+  if (!nodes.collectionResult) {
+    return;
+  }
   nodes.collectionResult.innerHTML = value;
-  publishMonitoringResult(nodes.collectionResult.innerHTML, nodes.collectionResult.textContent);
-}
-
-function publishMonitoringResult(htmlValue, textValue) {
-  const payload = {
-    html: htmlValue,
-    text: textValue,
-    updated_at: new Date().toISOString(),
-    device_id: state.selectedDevice?.device_id || "",
-    hostname: state.selectedDevice?.hostname || "",
-    management_ip: state.selectedDevice?.management_ip || "",
-    purpose: state.selectedPurpose || "",
-  };
-  localStorage.setItem(MONITORING_STORAGE_KEY, JSON.stringify(payload));
 }
 
 function formatCollectionResultHtml(result) {
@@ -556,8 +1640,12 @@ function formatCheckResultHtml(result) {
     lines.push(`[${status}] ${item.label}: ${item.detail}`);
   }
 
+  const interfaceSummary = formatInterfaceFindingSummary(result);
+  if (interfaceSummary) {
+    lines.push("", "===== INTERFACE FINDINGS =====", interfaceSummary);
+  }
+
   if (Array.isArray(result.parsed_ports) && result.parsed_ports.length) {
-    lines.push("", "===== INTERFACE FINDINGS =====", formatInterfaceFindingSummaryFromPorts(result.parsed_ports));
     const endpoints = formatEndpointIpSummaryFromPorts(result.parsed_ports);
     if (endpoints) {
       lines.push("", "===== CONNECTED ENDPOINTS =====", endpoints);
@@ -578,71 +1666,13 @@ function formatCheckResultHtml(result) {
 }
 
 function formatInterfaceFindingSummary(result) {
-  if (Array.isArray(result.parsed_ports) && result.parsed_ports.length) {
-    return formatInterfaceFindingSummaryFromPorts(result.parsed_ports);
-  }
-  if (!Array.isArray(result.commands) || !result.commands.includes("show interfaces status")) {
+  const findings = result.interface_findings || {};
+  const lowSpeedRows = Array.isArray(findings.low_speed_connected_ports) ? findings.low_speed_connected_ports : [];
+  const disabledRows = Array.isArray(findings.disabled_ports) ? findings.disabled_ports : [];
+  const highCounterRows = Array.isArray(findings.high_error_ports) ? findings.high_error_ports : [];
+  if (!lowSpeedRows.length && !disabledRows.length && !highCounterRows.length) {
     return "";
   }
-
-  const sections = commandSections(result.stdout || "");
-  const statusRows = parseInterfaceStatus(sections.get("show interfaces status") || "");
-  const counterRows = parseInterfaceErrorCounters(sections.get("show interfaces counters errors") || "");
-  if (!statusRows.length && !counterRows.length) {
-    return "";
-  }
-
-  const statusByPort = new Map(statusRows.map((row) => [row.port, row]));
-  const lowSpeedRows = statusRows.filter((row) => {
-    const speed = speedMbps(row.speed);
-    return row.status === "connected" && speed !== null && speed < 1000;
-  });
-  const disabledRows = statusRows.filter((row) => row.status === "disabled" || row.status === "errdisabled");
-  const highCounterRows = counterRows.filter((row) => Math.max(row.fcs, row.rx, row.runts, row.tx) >= 1000);
-
-  const lines = [];
-  if (lowSpeedRows.length) {
-    lines.push("LOW-SPEED CONNECTED PORTS");
-    for (const row of lowSpeedRows) {
-      lines.push(`- ${row.port}  status=${row.status}  vlan=${row.vlan}  duplex=${row.duplex}  speed=${row.speed}`);
-    }
-  } else {
-    lines.push("LOW-SPEED CONNECTED PORTS");
-    lines.push("- none found in collected interface status");
-  }
-
-  if (disabledRows.length) {
-    lines.push("", "DISABLED PORTS");
-    for (const row of disabledRows) {
-      lines.push(`- ${row.port}  status=${row.status}  vlan=${row.vlan}  speed=${row.speed}`);
-    }
-  }
-
-  if (highCounterRows.length) {
-    lines.push("", "HIGH ERROR COUNTERS");
-    for (const row of highCounterRows) {
-      const status = statusByPort.get(row.port);
-      const state = status ? `  current=${status.status}/${status.speed}` : "";
-      lines.push(`- ${row.port}${state}  FCS=${row.fcs}  Rx=${row.rx}  Runts=${row.runts}  Tx=${row.tx}`);
-    }
-  }
-
-  return lines.join("\n");
-}
-
-function formatInterfaceFindingSummaryFromPorts(ports) {
-  const lowSpeedRows = ports.filter((port) => (
-    port.status === "connected" &&
-    Number.isFinite(port.speed_mbps) &&
-    port.speed_mbps < 1000
-  ));
-  const disabledRows = ports.filter((port) => port.status === "disabled" || port.status === "errdisabled");
-  const highCounterRows = ports.filter((port) => Math.max(
-    Number(port.fcs_errors || 0),
-    Number(port.rx_errors || 0),
-    Number(port.runts || 0),
-    Number(port.tx_errors || 0),
-  ) >= 1000);
 
   const lines = [];
   lines.push("LOW-SPEED CONNECTED PORTS");
@@ -671,122 +1701,11 @@ function formatInterfaceFindingSummaryFromPorts(ports) {
   return lines.join("\n");
 }
 
-function parseInterfaceStatus(section) {
-  const statusTokens = new Set(["connected", "notconnect", "disabled", "errdisabled"]);
-  const rows = [];
-  for (const line of section.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("Port ") || /[>#]\s*$/.test(trimmed)) {
-      continue;
-    }
-    const parts = trimmed.split(/\s+/);
-    const statusIndex = parts.findIndex((part, index) => index > 0 && statusTokens.has(part.toLowerCase()));
-    if (statusIndex < 1 || parts.length < statusIndex + 4) {
-      continue;
-    }
-    rows.push({
-      port: shortInterfaceName(parts[0]),
-      name: parts.slice(1, statusIndex).join(" "),
-      status: parts[statusIndex].toLowerCase(),
-      vlan: parts[statusIndex + 1],
-      duplex: parts[statusIndex + 2],
-      speed: parts[statusIndex + 3],
-    });
-  }
-  return rows;
-}
-
-function parseInterfaceErrorCounters(section) {
-  const rows = [];
-  for (const line of section.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("Port ") || /[>#]\s*$/.test(trimmed)) {
-      continue;
-    }
-    const parts = trimmed.split(/\s+/);
-    if (parts.length < 8) {
-      continue;
-    }
-    rows.push({
-      port: shortInterfaceName(parts[0]),
-      fcs: Number(parts[1] || 0),
-      align: Number(parts[2] || 0),
-      symbol: Number(parts[3] || 0),
-      rx: Number(parts[4] || 0),
-      runts: Number(parts[5] || 0),
-      giants: Number(parts[6] || 0),
-      tx: Number(parts[7] || 0),
-    });
-  }
-  return rows;
-}
-
-function speedMbps(value) {
-  const normalized = String(value || "").toLowerCase().replace(/^a-/, "");
-  const match = normalized.match(/^(\d+)(m|g)$/);
-  if (!match) {
-    return null;
-  }
-  const amount = Number(match[1]);
-  return match[2] === "g" ? amount * 1000 : amount;
-}
-
 function formatEndpointIpSummary(result) {
   if (Array.isArray(result.parsed_ports) && result.parsed_ports.length) {
     return formatEndpointIpSummaryFromPorts(result.parsed_ports);
   }
-  if (!Array.isArray(result.commands) || !result.commands.includes("show interfaces description")) {
-    return "";
-  }
-  if (!result.commands.includes("show mac address-table") || !result.commands.includes("show ip arp")) {
-    return "";
-  }
-
-  const sections = commandSections(result.stdout || "");
-  const descriptions = parseInterfaceDescriptions(sections.get("show interfaces description") || "");
-  const macEntries = parseMacAddressTable(sections.get("show mac address-table") || "");
-  const arpEntries = parseIpArp(sections.get("show ip arp") || "");
-  if (!descriptions.length || !macEntries.length || !arpEntries.length) {
-    return "";
-  }
-
-  const ipsByMac = new Map();
-  for (const entry of arpEntries) {
-    if (!ipsByMac.has(entry.mac)) {
-      ipsByMac.set(entry.mac, new Set());
-    }
-    ipsByMac.get(entry.mac).add(entry.ip);
-  }
-
-  const endpointsByInterface = new Map();
-  for (const entry of macEntries) {
-    const ips = ipsByMac.get(entry.mac);
-    if (!ips || !ips.size) {
-      continue;
-    }
-    const interfaceName = shortInterfaceName(entry.interfaceName);
-    if (!endpointsByInterface.has(interfaceName)) {
-      endpointsByInterface.set(interfaceName, []);
-    }
-    for (const ip of ips) {
-      endpointsByInterface.get(interfaceName).push({ ip, mac: entry.macText });
-    }
-  }
-
-  const lines = [];
-  for (const item of descriptions) {
-    const interfaceName = shortInterfaceName(item.interfaceName);
-    const endpoints = endpointsByInterface.get(interfaceName) || [];
-    if (!endpoints.length) {
-      continue;
-    }
-    lines.push(`${interfaceName}  ${item.status}/${item.protocol}  ${item.description || "-"}`);
-    for (const endpoint of endpoints.sort((left, right) => ipSortKey(left.ip) - ipSortKey(right.ip))) {
-      lines.push(`  - ip=${endpoint.ip.padEnd(15)} mac=${endpoint.mac}`);
-    }
-  }
-
-  return lines.join("\n");
+  return "";
 }
 
 function formatEndpointIpSummaryFromPorts(ports) {
@@ -810,116 +1729,6 @@ function formatEndpointIpSummaryFromPorts(ports) {
     }
   }
   return lines.join("\n");
-}
-
-function commandSections(stdout) {
-  const sections = new Map();
-  let current = "";
-  let buffer = [];
-
-  for (const line of String(stdout || "").split(/\r?\n/)) {
-    const match = line.match(/^===== (.+?) =====$/);
-    if (match) {
-      if (current) {
-        sections.set(current, buffer.join("\n"));
-      }
-      current = match[1].trim();
-      buffer = [];
-      continue;
-    }
-    if (current) {
-      buffer.push(line);
-    }
-  }
-
-  if (current) {
-    sections.set(current, buffer.join("\n"));
-  }
-  return sections;
-}
-
-function parseInterfaceDescriptions(section) {
-  const rows = [];
-  for (const line of section.split(/\r?\n/)) {
-    const trimmed = line.trimEnd();
-    const stripped = trimmed.trim();
-    if (!stripped || stripped.toLowerCase() === "show interfaces description" || stripped.startsWith("Interface ") || /[>#]\s*$/.test(stripped)) {
-      continue;
-    }
-    const parts = stripped.split(/\s+/);
-    if (parts.length < 3) {
-      continue;
-    }
-    const adminDown = parts.length >= 4 && parts[1].toLowerCase() === "admin" && parts[2].toLowerCase() === "down";
-    const descriptionStart = adminDown ? 4 : 3;
-    rows.push({
-      interfaceName: parts[0],
-      status: adminDown ? "admin down" : parts[1],
-      protocol: adminDown ? parts[3] : parts[2],
-      description: parts.slice(descriptionStart).join(" "),
-    });
-  }
-  return rows;
-}
-
-function parseMacAddressTable(section) {
-  const rows = [];
-  for (const line of section.split(/\r?\n/)) {
-    const macMatch = line.match(/\b([0-9a-f]{4}[.:-][0-9a-f]{4}[.:-][0-9a-f]{4})\b/i);
-    if (!macMatch) {
-      continue;
-    }
-    const parts = line.trim().split(/\s+/);
-    const macIndex = parts.findIndex((part) => canonicalMac(part) === canonicalMac(macMatch[1]));
-    const interfaceName = parts.slice(macIndex + 1).find((part) => looksLikeInterface(part));
-    if (!interfaceName || /^CPU$/i.test(interfaceName)) {
-      continue;
-    }
-    rows.push({
-      mac: normalizeMac(macMatch[1]),
-      macText: canonicalMac(macMatch[1]),
-      interfaceName,
-    });
-  }
-  return rows;
-}
-
-function looksLikeInterface(value) {
-  return /^(Et|Ethernet|Gi|GigabitEthernet|Te|TenGigabitEthernet|Fa|FastEthernet|Po|Port-channel|Vl|Vlan|Ma)\S*$/i.test(String(value || "")) ||
-    String(value || "").toLowerCase() === "switch";
-}
-
-function parseIpArp(section) {
-  const rows = [];
-  for (const line of section.split(/\r?\n/)) {
-    const match = line.match(/\b(\d{1,3}(?:\.\d{1,3}){3})\s+\S+\s+([0-9a-f]{4}[.:-][0-9a-f]{4}[.:-][0-9a-f]{4})\s+/i);
-    if (!match) {
-      continue;
-    }
-    rows.push({
-      ip: match[1],
-      mac: normalizeMac(match[2]),
-    });
-  }
-  return rows;
-}
-
-function normalizeMac(value) {
-  return String(value || "").replace(/[^0-9a-f]/gi, "").toLowerCase();
-}
-
-function canonicalMac(value) {
-  const normalized = normalizeMac(value);
-  if (normalized.length !== 12) {
-    return String(value || "");
-  }
-  return `${normalized.slice(0, 4)}.${normalized.slice(4, 8)}.${normalized.slice(8, 12)}`;
-}
-
-function ipSortKey(value) {
-  return String(value || "")
-    .split(".")
-    .reduce((sum, octet) => (sum * 256) + Number(octet || 0), 0);
 }
 
 function formatCollectionError(error) {
@@ -956,11 +1765,17 @@ function summaryFromResult(result) {
 }
 
 function renderSummary(message, className) {
+  if (!nodes.diagnosticSummary) {
+    return;
+  }
   nodes.diagnosticSummary.className = `summary-box ${className}`;
   nodes.diagnosticSummary.textContent = message;
 }
 
 async function loadDiagnostics() {
+  if (!nodes.diagnosticFindings) {
+    return;
+  }
   nodes.diagnosticFindings.replaceChildren();
   if (!state.selectedDevice) {
     renderSummary("Select a device.", "warn");
@@ -993,6 +1808,9 @@ async function loadDiagnostics() {
 }
 
 async function loadNeighbors() {
+  if (!nodes.neighborsBody || !nodes.neighborsNote) {
+    return;
+  }
   nodes.neighborsBody.replaceChildren();
   nodes.neighborsNote.textContent = "Reference only";
   if (!state.selectedDevice) {
@@ -1062,7 +1880,7 @@ function appendNeighborAction(row, managedDevice) {
   button.className = "table-action";
   button.textContent = "Detail";
   button.title =
-    managedDevice.access_method === "telnet"
+    isCollectable(managedDevice)
       ? "Show device detail, command plan, diagnostics, and collection controls."
       : "Show device detail and command plan. Collection is disabled until access is verified.";
   button.addEventListener("click", (event) => {
@@ -1075,8 +1893,7 @@ function appendNeighborAction(row, managedDevice) {
 
 async function openManagedDevice(deviceId) {
   await selectDevice(deviceId);
-  const access = state.selectedDevice?.access_method || "unknown";
-  const collectState = access === "telnet" ? "collect enabled" : "collect disabled until access is verified";
+  const collectState = isCollectable(state.selectedDevice) ? "collect enabled" : "collect disabled until access is verified";
   setStatus(`Selected ${deviceId}. ${collectState}.`, true);
   document.querySelector(".detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
@@ -1085,7 +1902,7 @@ function collectionReadyMessage(device) {
   if (!device) {
     return "No collection attempted.";
   }
-  if (device.access_method !== "telnet") {
+  if (!isCollectable(device)) {
     return [
       `Device: ${device.device_id} (${device.management_ip})`,
       "Collection: disabled",
@@ -1128,6 +1945,9 @@ function severityClass(severity) {
 }
 
 async function loadAudit() {
+  if (!nodes.auditBody) {
+    return;
+  }
   const payload = await api("/audit-log?limit=100");
   nodes.auditBody.replaceChildren();
   for (const event of payload.events.slice().reverse()) {
@@ -1155,41 +1975,64 @@ function appendCells(row, values) {
   }
 }
 
-nodes.refreshDevices.addEventListener("click", () => {
+nodes.refreshDevices?.addEventListener("click", () => {
   loadDevices().catch((error) => setStatus(error.message, false));
 });
-nodes.refreshAudit.addEventListener("click", () => {
+nodes.dashboardShowAll?.addEventListener("click", () => {
+  state.dashboardFilter = "all";
+  state.topologyFloorFilter = "all";
+  state.topologyVendorFilter = "all";
+  state.topologyTierFilter = "all";
+  state.topologyAutoFit = false;
+  state.topologyZoom = 1;
+  renderDashboard();
+});
+nodes.dashboardShowIssues?.addEventListener("click", () => {
+  state.dashboardFilter = "issues";
+  state.topologyAutoFit = false;
+  state.topologyZoom = 1;
+  renderDashboard();
+});
+nodes.refreshAudit?.addEventListener("click", () => {
   loadAudit().catch((error) => setStatus(error.message, false));
 });
-nodes.checkDevice.addEventListener("click", () => {
+nodes.checkDevice?.addEventListener("click", () => {
   checkSelectedDevice().catch((error) => renderSummary(error.message, "error"));
 });
-nodes.loadPlan.addEventListener("click", () => {
+nodes.loadPlan?.addEventListener("click", () => {
   loadCommandPlan().catch((error) => renderSummary(error.message, "error"));
 });
-nodes.collect.addEventListener("click", () => {
+nodes.collect?.addEventListener("click", () => {
   collectSelected().catch((error) => renderSummary(error.message, "error"));
 });
-nodes.searchButton.addEventListener("click", () => {
+nodes.searchButton?.addEventListener("click", () => {
   runSearch().catch((error) => setStatus(error.message, false));
 });
-nodes.searchInput.addEventListener("keydown", (event) => {
+nodes.searchInput?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     runSearch().catch((error) => setStatus(error.message, false));
   }
 });
-nodes.diagnosePort.addEventListener("click", () => {
+nodes.diagnosePort?.addEventListener("click", () => {
   diagnoseSelectedPort().catch((error) => renderSummary(error.message, "error"));
 });
-nodes.purposeSelect.addEventListener("change", () => {
+nodes.purposeSelect?.addEventListener("change", () => {
   state.selectedPurpose = nodes.purposeSelect.value;
   state.latestPlan = null;
   renderCommandPlan(null);
-  nodes.collect.disabled = true;
+  if (nodes.collect) {
+    nodes.collect.disabled = true;
+  }
   loadCommandPlan().catch((error) => renderSummary(error.message, "error"));
+});
+window.addEventListener("resize", () => {
+  renderTopologyMap();
 });
 
 Promise.all([api("/health"), loadDevices(), loadAudit()])
-  .then(([health]) => setStatus(`API connected. ${health.mode}.`, true))
+  .then(([health]) => {
+    setStatus(`API connected. ${health.mode}.`, true);
+    startTopologyStream();
+  })
   .catch((error) => setStatus(error.message, false));
