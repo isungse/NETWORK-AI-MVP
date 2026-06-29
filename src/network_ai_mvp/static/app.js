@@ -15,6 +15,19 @@ const state = {
   selectedPurpose: "",
   latestPlan: null,
   selectedPort: null,
+  latestPorts: [],
+  latestPortSummary: {},
+  portStatusFilter: "all",
+  portModeFilter: "all",
+  portVlanFilter: "",
+  portSearchQuery: "",
+  previewReady: false,
+  previewAction: "collect",
+  latestResult: null,
+  rawOutput: "",
+  rawSearchQuery: "",
+  activeResultTab: "summary",
+  activeDetailTab: "summary",
 };
 
 const page = document.body.dataset.page || "operations";
@@ -38,6 +51,24 @@ const nodes = {
   commandPlan: document.querySelector("#commandPlan"),
   diagnosticSummary: document.querySelector("#diagnosticSummary"),
   diagnosticFindings: document.querySelector("#diagnosticFindings"),
+  detailSeverity: document.querySelector("#detailSeverity"),
+  commandPreview: document.querySelector("#commandPreview"),
+  portMatrixMeta: document.querySelector("#portMatrixMeta"),
+  portMatrixSummary: document.querySelector("#portMatrixSummary"),
+  portMatrix: document.querySelector("#portMatrix"),
+  portTableBody: document.querySelector("#portTableBody"),
+  portRefresh: document.querySelector("#portRefresh"),
+  portStatusFilter: document.querySelector("#portStatusFilter"),
+  portModeFilter: document.querySelector("#portModeFilter"),
+  portVlanFilter: document.querySelector("#portVlanFilter"),
+  portSearchInput: document.querySelector("#portSearchInput"),
+  portHealthSummary: document.querySelector("#portHealthSummary"),
+  vlanMacSummary: document.querySelector("#vlanMacSummary"),
+  collectionSummary: document.querySelector("#collectionSummary"),
+  collectionMetrics: document.querySelector("#collectionMetrics"),
+  resultMeta: document.querySelector("#resultMeta"),
+  rawSearchInput: document.querySelector("#rawSearchInput"),
+  copyRawOutput: document.querySelector("#copyRawOutput"),
   neighborsNote: document.querySelector("#neighborsNote"),
   neighborsBody: document.querySelector("#neighborsBody"),
   searchInput: document.querySelector("#searchInput"),
@@ -60,6 +91,17 @@ const STATUS_COLOR = {
   fault: "#E24B4A",
   stale: "#888780",
   unreachable: "#888780",
+};
+
+const SEVERITY = {
+  down: { label: "Down", rank: 8, title: "Service impact or unreachable state" },
+  critical: { label: "Critical", rank: 7, title: "Immediate operator attention required" },
+  warning: { label: "Warning", rank: 6, title: "Attention required" },
+  unknown: { label: "Unknown", rank: 5, title: "State cannot be confirmed" },
+  maintenance: { label: "Maintenance", rank: 4, title: "Planned maintenance or disabled state" },
+  info: { label: "Info", rank: 3, title: "Informational state" },
+  normal: { label: "Normal", rank: 2, title: "No current abnormal condition" },
+  resolved: { label: "Resolved", rank: 1, title: "Issue has been resolved" },
 };
 
 const TOPOLOGY_LAYOUT = {
@@ -109,6 +151,91 @@ function isCollectable(device) {
   return Boolean(device?.collectable);
 }
 
+function normalizeSeverity(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "ok" || normalized === "connected" || normalized === "success") {
+    return "normal";
+  }
+  if (normalized === "stale" || normalized === "unreachable" || normalized === "not_evaluated") {
+    return "unknown";
+  }
+  if (normalized === "fail" || normalized === "error" || normalized === "fault") {
+    return "critical";
+  }
+  return SEVERITY[normalized] ? normalized : "unknown";
+}
+
+function severityBadge(value, labelOverride) {
+  const severity = normalizeSeverity(value);
+  const badge = document.createElement("span");
+  badge.className = `severity-badge severity-${severity}`;
+  badge.title = SEVERITY[severity].title;
+  const dot = document.createElement("span");
+  dot.className = "severity-dot";
+  badge.append(dot, document.createTextNode(labelOverride || SEVERITY[severity].label));
+  return badge;
+}
+
+function setSeverityBadge(node, value, labelOverride) {
+  if (!node) {
+    return;
+  }
+  node.replaceChildren(...severityBadge(value, labelOverride).childNodes);
+  node.className = `severity-badge severity-${normalizeSeverity(value)}`;
+  node.title = SEVERITY[normalizeSeverity(value)].title;
+}
+
+function deviceStatus(device) {
+  const row = state.dashboardDevices.find((item) => item.device.device_id === device?.device_id);
+  if (!row) {
+    return isCollectable(device) ? "info" : "unknown";
+  }
+  return normalizeSeverity(dashboardStatus(row));
+}
+
+function portSeverity(port) {
+  if (!port) {
+    return "unknown";
+  }
+  if (hasPortErrors(port)) {
+    return "critical";
+  }
+  const status = String(port.status || "").toLowerCase();
+  if (["errdisabled"].includes(status)) {
+    return "critical";
+  }
+  if (["notconnect", "down"].includes(status)) {
+    return "down";
+  }
+  if (["disabled"].includes(status)) {
+    return "maintenance";
+  }
+  if (!status) {
+    return "unknown";
+  }
+  return "normal";
+}
+
+function hasPortErrors(port) {
+  return (
+    Number(port?.fcs_errors || 0) > 0 ||
+    Number(port?.rx_errors || 0) > 0 ||
+    Number(port?.runts || 0) > 0 ||
+    Number(port?.tx_errors || 0) > 0 ||
+    Number(port?.align_errors || 0) > 0 ||
+    Number(port?.symbol_errors || 0) > 0
+  );
+}
+
+function portMode(port) {
+  const vlan = String(port?.vlan || "").toLowerCase();
+  const description = String(port?.description || "").toLowerCase();
+  if (vlan.includes("trunk") || vlan === "routed" || description.includes("trunk") || description.includes("uplink")) {
+    return "trunk";
+  }
+  return "access";
+}
+
 function renderDevices() {
   if (!nodes.devicesBody) {
     return;
@@ -121,11 +248,15 @@ function renderDevices() {
     if (state.selectedDevice?.device_id === device.device_id) {
       row.classList.add("selected");
     }
+    const statusCell = document.createElement("td");
+    statusCell.append(severityBadge(deviceStatus(device)));
+    row.append(statusCell);
     appendCells(row, [
       device.device_id,
       device.hostname,
       device.management_ip,
       device.vendor,
+      device.platform,
       device.role,
       device.access_method,
     ]);
@@ -144,8 +275,10 @@ function renderDeviceFacts(device) {
   nodes.selectedDeviceId.textContent = device ? device.device_id : "No device selected";
   nodes.deviceFacts.replaceChildren();
   if (!device) {
+    setSeverityBadge(nodes.detailSeverity, "unknown");
     return;
   }
+  setSeverityBadge(nodes.detailSeverity, deviceStatus(device));
 
   const facts = [
     ["Hostname", device.hostname],
@@ -182,7 +315,9 @@ async function loadDevices() {
   await loadDiagnostics();
   await loadNeighbors();
   await loadPurposes();
+  await loadPorts();
   renderPortDetail(null);
+  renderDiagnosticResult(null);
   setStatus(`API connected. ${state.devices.length} devices loaded.`, true);
 }
 
@@ -193,6 +328,8 @@ async function selectDevice(deviceId) {
     null;
   state.latestPlan = null;
   state.selectedPort = null;
+  state.previewReady = false;
+  state.previewAction = "collect";
   renderDevices();
   renderDashboard();
   renderDeviceFacts(state.selectedDevice);
@@ -203,7 +340,9 @@ async function selectDevice(deviceId) {
   await loadDiagnostics();
   await loadNeighbors();
   await loadPurposes();
+  await loadPorts();
   setCollectionResultText(collectionReadyMessage(state.selectedDevice));
+  renderDiagnosticResult(null);
 }
 
 function updateCheckButton() {
@@ -211,6 +350,7 @@ function updateCheckButton() {
     return;
   }
   nodes.checkDevice.disabled = !isCollectable(state.selectedDevice);
+  nodes.checkDevice.textContent = "Preview CHECK";
 }
 
 async function loadPurposes() {
@@ -239,6 +379,8 @@ async function loadPurposes() {
   nodes.purposeSelect.disabled = !state.selectedPurpose;
   nodes.loadPlan.disabled = !state.selectedPurpose;
   nodes.collect.disabled = true;
+  state.previewReady = false;
+  state.previewAction = "collect";
   if (state.selectedPurpose) {
     await loadCommandPlan();
   }
@@ -255,7 +397,7 @@ async function loadCommandPlan() {
     `/devices/${encodeURIComponent(state.selectedDevice.device_id)}/command-plan/${encodeURIComponent(state.selectedPurpose)}`,
   );
   renderCommandPlan(state.latestPlan);
-  nodes.collect.disabled = !isCollectable(state.selectedDevice);
+  renderCommandPreview(state.latestPlan, { action: "collect" });
 }
 
 function renderCommandPlan(plan) {
@@ -273,6 +415,87 @@ function renderCommandPlan(plan) {
   }
 }
 
+function renderCommandPreview(plan, { action = "collect", port = state.selectedPort } = {}) {
+  state.previewAction = action;
+  state.previewReady = Boolean(
+    state.selectedDevice &&
+    isCollectable(state.selectedDevice) &&
+    plan &&
+    Array.isArray(plan.commands) &&
+    plan.commands.length &&
+    plan.read_only !== false,
+  );
+  if (nodes.collect) {
+    nodes.collect.textContent = action === "check" ? "Run CHECK" : "Run Diagnostic";
+    nodes.collect.disabled = !state.previewReady;
+  }
+  if (!nodes.commandPreview) {
+    return;
+  }
+  nodes.commandPreview.replaceChildren();
+  if (!state.selectedDevice) {
+    nodes.commandPreview.className = "command-preview empty-state";
+    nodes.commandPreview.textContent = "Select a device and purpose to preview read-only commands before execution.";
+    return;
+  }
+  if (!plan) {
+    nodes.commandPreview.className = "command-preview empty-state";
+    nodes.commandPreview.textContent = "Generate a command preview before running diagnostics.";
+    return;
+  }
+
+  nodes.commandPreview.className = `command-preview ${state.previewReady ? "safe" : "blocked"}`;
+  const header = document.createElement("div");
+  header.className = "preview-header";
+  header.append(
+    severityBadge(state.previewReady ? "info" : "critical", state.previewReady ? "Read-only / Safe" : "Blocked"),
+  );
+  const title = document.createElement("strong");
+  title.textContent = action === "check" ? "One-click Network CHECK Preview" : "Diagnostic Execution Preview";
+  header.prepend(title);
+
+  const facts = document.createElement("dl");
+  facts.className = "preview-facts";
+  const expected = expectedOutputForPurpose(action === "check" ? "check" : plan.purpose);
+  const rows = [
+    ["Target Device", state.selectedDevice.device_id],
+    ["Management IP", state.selectedDevice.management_ip],
+    ["Target Port", port?.interface || "Device scope"],
+    ["Purpose", action === "check" ? "check" : plan.purpose],
+    ["Risk Level", plan.read_only === false ? "Blocked" : "Read-only / Safe Diagnostic"],
+    ["Expected Output", expected],
+    ["Estimated Time", action === "check" ? "30-90 seconds" : "10-45 seconds"],
+    ["Audit Logging", "Enabled after execution"],
+  ];
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = text(value);
+    facts.append(dt, dd);
+  }
+
+  const notice = document.createElement("p");
+  notice.className = "safety-notice";
+  notice.textContent = "This diagnostic will run read-only commands only. No configuration changes will be made.";
+
+  nodes.commandPreview.append(header, facts, notice);
+}
+
+function expectedOutputForPurpose(purpose) {
+  const map = {
+    check: "Interface status, error counters, endpoint correlation, topology and switching observations",
+    interfaces: "Interface status, speed/duplex, descriptions, and error counters",
+    endpoints: "Interface descriptions, MAC table, and ARP correlation",
+    "port-endpoints": "Port status, descriptions, MAC addresses, and ARP correlation",
+    topology: "CDP/LLDP neighbor relationships and link evidence",
+    switching: "VLAN, trunk, spanning-tree, MAC table, and switching state",
+    baseline: "Version, hostname, interface overview, and baseline inventory evidence",
+    "security-logs": "Logging and user-session evidence",
+  };
+  return map[purpose] || "Read-only command output and parsed diagnostic evidence";
+}
+
 async function checkSelectedDevice() {
   if (!nodes.checkDevice) {
     return;
@@ -288,9 +511,23 @@ async function checkSelectedDevice() {
     }]);
     return;
   }
+  if (state.previewAction !== "check" || !state.previewReady) {
+    const plan = await buildCheckPreviewPlan();
+    state.latestPlan = plan;
+    renderCommandPlan(plan);
+    renderCommandPreview(plan, { action: "check" });
+    nodes.checkDevice.textContent = "CHECK Preview Ready";
+    renderSummary("CHECK preview is ready. Review the target and commands, then click Run CHECK in the detail panel.", "warn");
+    activateDetailTab("diagnostics");
+    return;
+  }
 
   nodes.checkDevice.disabled = true;
+  if (nodes.collect) {
+    nodes.collect.disabled = true;
+  }
   state.selectedPurpose = "check";
+  state.previewReady = false;
   renderCheckResults([{
     label: "CHECK",
     status: "unknown",
@@ -306,6 +543,7 @@ async function checkSelectedDevice() {
     );
     renderCheckResults(result.check_items);
     setCollectionResultHtml(formatCheckResultHtml(result));
+    renderDiagnosticResult(result);
     renderSummary(
       result.success ? "CHECK completed. Review the Network Check results." : `CHECK failed. ${text(result.error_summary)}`,
       result.success ? "ok" : "error",
@@ -317,13 +555,58 @@ async function checkSelectedDevice() {
       detail: error.message,
     }]);
     setCollectionResultHtml(escapeHtml(formatCollectionError(error)));
+    renderDiagnosticResult({
+      success: false,
+      device_id: state.selectedDevice.device_id,
+      management_ip: state.selectedDevice.management_ip,
+      purpose: "check",
+      commands: state.latestPlan?.commands || [],
+      error_summary: error.message,
+      stdout: "",
+      stderr: "",
+      parsed_ports: [],
+      interface_findings: {},
+    });
     renderSummary(error.message, "error");
   } finally {
     updateCheckButton();
+    if (nodes.collect) {
+      nodes.collect.disabled = true;
+    }
     await loadAudit();
     await loadDashboard();
     await loadDiagnostics();
+    await loadPorts();
   }
+}
+
+async function buildCheckPreviewPlan() {
+  const preferredPurposes = ["interfaces", "endpoints", "topology", "switching"];
+  const available = Array.from(nodes.purposeSelect?.options || []).map((option) => option.value);
+  const purposes = preferredPurposes.filter((purpose) => available.includes(purpose));
+  const commands = [];
+  const seen = new Set();
+  for (const purpose of purposes) {
+    try {
+      const plan = await api(
+        `/devices/${encodeURIComponent(state.selectedDevice.device_id)}/command-plan/${encodeURIComponent(purpose)}`,
+      );
+      for (const command of plan.commands || []) {
+        if (!seen.has(command)) {
+          seen.add(command);
+          commands.push(command);
+        }
+      }
+    } catch {
+      // Skip unavailable preview fragments; backend execution still enforces policy.
+    }
+  }
+  return {
+    device: state.selectedDevice,
+    purpose: "check",
+    commands,
+    read_only: commands.length > 0,
+  };
 }
 
 function renderCheckResults(items) {
@@ -345,7 +628,7 @@ function renderCheckResults(items) {
 
     const statusNode = document.createElement("div");
     statusNode.className = "check-status";
-    statusNode.textContent = checkStatusLabel(status);
+    statusNode.append(severityBadge(checkSeverity(status), checkStatusLabel(status)));
 
     const labelNode = document.createElement("div");
     labelNode.className = "check-label";
@@ -366,6 +649,19 @@ function checkStatus(status) {
 
 function checkStatusLabel(status) {
   return status === "not_evaluated" ? "not evaluated" : status;
+}
+
+function checkSeverity(status) {
+  if (status === "ok") {
+    return "normal";
+  }
+  if (status === "warn") {
+    return "warning";
+  }
+  if (status === "fail") {
+    return "critical";
+  }
+  return "unknown";
 }
 
 async function runSearch() {
@@ -418,12 +714,12 @@ async function openSearchResult(result) {
   }
   if (result.type === "port" && result.device_id && result.interface) {
     await loadPortDetail(result.device_id, result.interface);
-    document.querySelector(".port-detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    document.querySelector(".detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
     return;
   }
   if (result.type === "neighbor") {
     renderReferencePortDetail(result);
-    document.querySelector(".port-detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    document.querySelector(".detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 }
 
@@ -438,6 +734,252 @@ async function loadPortDetail(deviceId, interfaceName) {
   renderPortDetail(payload.port);
 }
 
+async function loadPorts() {
+  if (!nodes.portMatrix && !nodes.portTableBody) {
+    return;
+  }
+  state.latestPorts = [];
+  state.latestPortSummary = {};
+  nodes.portMatrix?.replaceChildren();
+  nodes.portTableBody?.replaceChildren();
+  nodes.portMatrixSummary?.replaceChildren();
+  if (!state.selectedDevice) {
+    if (nodes.portMatrixMeta) {
+      nodes.portMatrixMeta.textContent = "Select a device to load latest parsed port state.";
+    }
+    renderPortEmptyState("No device selected.");
+    return;
+  }
+  if (nodes.portMatrixMeta) {
+    nodes.portMatrixMeta.textContent = `Loading ports for ${state.selectedDevice.device_id}...`;
+  }
+  try {
+    const payload = await api(`/devices/${encodeURIComponent(state.selectedDevice.device_id)}/ports/latest`);
+    state.latestPorts = (Array.isArray(payload.ports) ? payload.ports : []).filter((port) =>
+      looksLikePortInterface(port?.interface),
+    );
+    state.latestPortSummary = payload.summary || {};
+    if (nodes.portMatrixMeta) {
+      nodes.portMatrixMeta.textContent = payload.data_available
+        ? `${state.selectedDevice.hostname} (${state.selectedDevice.management_ip}) - ${text(payload.timestamp)}`
+        : payload.message || "No stored parsed observation yet.";
+    }
+    renderPortMatrix();
+  } catch (error) {
+    if (nodes.portMatrixMeta) {
+      nodes.portMatrixMeta.textContent = error.message;
+    }
+    renderPortEmptyState("Port state could not be loaded.");
+  }
+}
+
+function renderPortMatrix() {
+  renderPortSummary();
+  renderPortTiles();
+  renderPortTable();
+}
+
+function renderPortSummary() {
+  if (!nodes.portMatrixSummary) {
+    return;
+  }
+  const ports = state.latestPorts;
+  const counts = {
+    total: ports.length,
+    up: ports.filter((port) => portSeverity(port) === "normal").length,
+    down: ports.filter((port) => portSeverity(port) === "down").length,
+    error: ports.filter((port) => portSeverity(port) === "critical").length,
+    disabled: ports.filter((port) => portSeverity(port) === "maintenance").length,
+    trunk: ports.filter((port) => portMode(port) === "trunk").length,
+    access: ports.filter((port) => portMode(port) === "access").length,
+  };
+  const metrics = [
+    ["Total Ports", counts.total, "info"],
+    ["Up", counts.up, "normal"],
+    ["Down", counts.down, "down"],
+    ["Error", counts.error, "critical"],
+    ["Disabled", counts.disabled, "maintenance"],
+    ["Trunk", counts.trunk, "info"],
+    ["Access", counts.access, "normal"],
+  ];
+  nodes.portMatrixSummary.replaceChildren();
+  for (const [label, value, severity] of metrics) {
+    const item = document.createElement("div");
+    item.className = `metric-card metric-${normalizeSeverity(severity)}`;
+    const valueNode = document.createElement("strong");
+    valueNode.textContent = value;
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    item.append(valueNode, labelNode);
+    nodes.portMatrixSummary.append(item);
+  }
+}
+
+function renderPortTiles() {
+  if (!nodes.portMatrix) {
+    return;
+  }
+  nodes.portMatrix.replaceChildren();
+  const ports = filteredPorts();
+  if (!state.latestPorts.length) {
+    renderPortEmptyState("No parsed ports found. Run a read-only interface collection first.");
+    return;
+  }
+  if (!ports.length) {
+    renderPortEmptyState("No ports match the current filters.");
+    return;
+  }
+  for (const port of ports) {
+    const button = document.createElement("button");
+    const severity = portSeverity(port);
+    button.type = "button";
+    button.className = `port-tile severity-${severity}`;
+    button.dataset.interface = port.interface;
+    if (state.selectedPort?.interface === port.interface) {
+      button.classList.add("selected");
+    }
+    button.title = portTooltip(port);
+    const name = document.createElement("span");
+    name.className = "port-name";
+    name.textContent = shortInterfaceName(port.interface);
+    const status = document.createElement("span");
+    status.className = "port-status";
+    status.textContent = portTileLabel(port);
+    const mode = document.createElement("span");
+    mode.className = "port-mode";
+    mode.textContent = portMode(port);
+    button.append(name, status, mode);
+    button.addEventListener("click", () => {
+      renderPortDetail(port);
+      renderPortMatrix();
+      activateDetailTab("summary");
+    });
+    nodes.portMatrix.append(button);
+  }
+}
+
+function renderPortTable() {
+  if (!nodes.portTableBody) {
+    return;
+  }
+  nodes.portTableBody.replaceChildren();
+  for (const port of filteredPorts()) {
+    const row = document.createElement("tr");
+    row.className = "port-table-row";
+    row.addEventListener("click", () => {
+      renderPortDetail(port);
+      renderPortMatrix();
+      activateDetailTab("summary");
+    });
+    const statusCell = document.createElement("td");
+    statusCell.append(severityBadge(portSeverity(port), portTileLabel(port)));
+    appendCells(row, [
+      shortInterfaceName(port.interface),
+    ]);
+    row.insertBefore(statusCell, row.children[1] || null);
+    appendCells(row, [
+      portMode(port),
+      port.vlan,
+      port.speed,
+      port.duplex,
+      port.fcs_errors || 0,
+      port.rx_errors || 0,
+      Array.isArray(port.endpoint_macs) ? port.endpoint_macs.length : 0,
+      port.description,
+    ]);
+    nodes.portTableBody.append(row);
+  }
+}
+
+function renderPortEmptyState(message) {
+  if (!nodes.portMatrix) {
+    return;
+  }
+  nodes.portMatrix.replaceChildren();
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+  empty.textContent = message;
+  nodes.portMatrix.append(empty);
+}
+
+function filteredPorts() {
+  return state.latestPorts.filter((port) => {
+    const severity = portSeverity(port);
+    if (state.portStatusFilter !== "all") {
+      const matchesStatus =
+        (state.portStatusFilter === "error" && severity === "critical") ||
+        (state.portStatusFilter === "down" && severity === "down") ||
+        (state.portStatusFilter === "disabled" && severity === "maintenance") ||
+        (state.portStatusFilter === "up" && severity === "normal") ||
+        (state.portStatusFilter === "unknown" && severity === "unknown");
+      if (!matchesStatus) {
+        return false;
+      }
+    }
+    if (state.portModeFilter !== "all" && portMode(port) !== state.portModeFilter) {
+      return false;
+    }
+    if (state.portVlanFilter && !String(port.vlan || "").toLowerCase().includes(state.portVlanFilter)) {
+      return false;
+    }
+    if (state.portSearchQuery) {
+      const haystack = [
+        port.interface,
+        port.description,
+        port.status,
+        port.speed,
+        port.duplex,
+        port.neighbor_name,
+        port.neighbor_ip,
+      ].join(" ").toLowerCase();
+      if (!haystack.includes(state.portSearchQuery)) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+function portTileLabel(port) {
+  const severity = portSeverity(port);
+  if (severity === "critical") {
+    return hasPortErrors(port) ? "ERR" : "CRIT";
+  }
+  if (severity === "down") {
+    return "DOWN";
+  }
+  if (severity === "maintenance") {
+    return "DIS";
+  }
+  if (severity === "unknown") {
+    return "UNK";
+  }
+  return "UP";
+}
+
+function looksLikePortInterface(value) {
+  const textValue = String(value || "").trim();
+  if (!textValue || /[\s,]/.test(textValue)) {
+    return false;
+  }
+  return /^(Et|Ethernet|Gi|GigabitEthernet|Te|TenGigabitEthernet|Fa|FastEthernet)\d+(?:\/\d+)*(?:\.\d+)?$|^(Po|Port-channel|Port-Channel)\d+$/i.test(textValue);
+}
+
+function portTooltip(port) {
+  return [
+    `Port: ${text(port.interface)}`,
+    `Status: ${text(port.status)}`,
+    `VLAN: ${text(port.vlan)}`,
+    `Mode: ${portMode(port)}`,
+    `Speed / Duplex: ${text(port.speed)} / ${text(port.duplex)}`,
+    `Description: ${text(port.description)}`,
+    `Last Change: ${text(port.source_timestamp)}`,
+    `CRC/FCS Errors: ${port.fcs_errors || 0}`,
+    `Input/Rx Errors: ${port.rx_errors || 0}`,
+    `Connected MAC Count: ${Array.isArray(port.endpoint_macs) ? port.endpoint_macs.length : 0}`,
+  ].join("\n");
+}
+
 function renderPortDetail(port, message = "Search for a port, IP, MAC, or device to inspect stored parsed state.") {
   if (!nodes.portDetailFacts || !nodes.portDetailState || !nodes.diagnosePort) {
     state.selectedPort = port;
@@ -449,12 +991,17 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
   if (!port) {
     nodes.portDetailState.className = "summary-box warn";
     nodes.portDetailState.textContent = message;
+    nodes.portHealthSummary && (nodes.portHealthSummary.textContent = "Select a port to review counters and status.");
+    nodes.vlanMacSummary && (nodes.vlanMacSummary.textContent = "Select a parsed port to inspect VLAN, mode, endpoints, and neighbors.");
+    setSeverityBadge(nodes.detailSeverity, state.selectedDevice ? deviceStatus(state.selectedDevice) : "unknown");
     return;
   }
+  setSeverityBadge(nodes.detailSeverity, portSeverity(port), `${shortInterfaceName(port.interface)} ${SEVERITY[portSeverity(port)].label}`);
 
   const facts = [
     ["Interface", port.interface],
     ["Status", port.status],
+    ["Mode", portMode(port)],
     ["VLAN", port.vlan],
     ["Speed / Duplex", `${text(port.speed)} / ${text(port.duplex)}`],
     ["Description", port.description],
@@ -477,6 +1024,57 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
   }
   nodes.portDetailState.className = "summary-box ok";
   nodes.portDetailState.textContent = "Stored parsed observation loaded. Documentation/reference data is not treated as live truth.";
+  renderPortAuxiliaryDetail(port);
+}
+
+function renderPortAuxiliaryDetail(port) {
+  if (nodes.portHealthSummary) {
+    nodes.portHealthSummary.replaceChildren();
+    const list = document.createElement("dl");
+    list.className = "facts compact-facts";
+    const rows = [
+      ["Operational Status", port.status],
+      ["Speed / Duplex", `${text(port.speed)} / ${text(port.duplex)}`],
+      ["CRC/FCS Errors", port.fcs_errors || 0],
+      ["Input/Rx Errors", port.rx_errors || 0],
+      ["Runts", port.runts || 0],
+      ["Tx Errors", port.tx_errors || 0],
+      ["Last Observed", port.source_timestamp],
+    ];
+    for (const [label, value] of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = text(value);
+      list.append(dt, dd);
+    }
+    nodes.portHealthSummary.className = "detail-section";
+    nodes.portHealthSummary.append(list);
+  }
+  if (nodes.vlanMacSummary) {
+    nodes.vlanMacSummary.replaceChildren();
+    const list = document.createElement("dl");
+    list.className = "facts compact-facts";
+    const rows = [
+      ["VLAN", port.vlan],
+      ["Mode", portMode(port)],
+      ["Endpoint IPs", listText(port.endpoint_ips)],
+      ["Endpoint MACs", listText(port.endpoint_macs)],
+      ["Connected MAC Count", Array.isArray(port.endpoint_macs) ? port.endpoint_macs.length : 0],
+      ["Neighbor", port.neighbor_name],
+      ["Neighbor IP", port.neighbor_ip],
+      ["Neighbor Platform", port.neighbor_platform],
+    ];
+    for (const [label, value] of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = text(value);
+      list.append(dt, dd);
+    }
+    nodes.vlanMacSummary.className = "detail-section";
+    nodes.vlanMacSummary.append(list);
+  }
 }
 
 function renderReferencePortDetail(result) {
@@ -487,6 +1085,7 @@ function renderReferencePortDetail(result) {
   state.selectedPort = null;
   nodes.portDetailFacts.replaceChildren();
   nodes.diagnosePort.disabled = !state.selectedDevice;
+  setSeverityBadge(nodes.detailSeverity, "unknown", "Reference");
   const facts = [
     ["Interface", result.interface],
     ["Reference Target", result.label],
@@ -503,6 +1102,8 @@ function renderReferencePortDetail(result) {
   }
   nodes.portDetailState.className = "summary-box warn";
   nodes.portDetailState.textContent = "Reference match only. Run read-only collection before treating this as live state.";
+  nodes.portHealthSummary && (nodes.portHealthSummary.textContent = "Reference match only. Run collection before using health counters.");
+  nodes.vlanMacSummary && (nodes.vlanMacSummary.textContent = "Reference match only. Live VLAN/MAC state is not available.");
 }
 
 async function diagnoseSelectedPort() {
@@ -520,7 +1121,8 @@ async function diagnoseSelectedPort() {
   state.selectedPurpose = "interfaces";
   nodes.purposeSelect.value = "interfaces";
   await loadCommandPlan();
-  renderSummary("Port diagnostic plan loaded. Review the allowlisted commands, then click Collect when ready.", "warn");
+  renderSummary("Port diagnostic preview loaded. Review the target, risk level, and commands before running diagnostics.", "warn");
+  activateDetailTab("diagnostics");
 }
 
 function listText(values) {
@@ -531,6 +1133,10 @@ async function collectSelected() {
   if (!nodes.collect) {
     return;
   }
+  if (state.previewAction === "check") {
+    await checkSelectedDevice();
+    return;
+  }
   if (!state.selectedDevice || !state.selectedPurpose) {
     return;
   }
@@ -538,8 +1144,17 @@ async function collectSelected() {
     renderSummary("Collection is disabled until this device access method and credentials are verified.", "warn");
     return;
   }
+  if (!state.previewReady || !state.latestPlan) {
+    if (state.latestPlan) {
+      renderCommandPreview(state.latestPlan, { action: "collect" });
+    }
+    renderSummary("Review the command preview before running diagnostics.", "warn");
+    activateDetailTab("diagnostics");
+    return;
+  }
 
   nodes.collect.disabled = true;
+  state.previewReady = false;
   setCollectionResultText("Collecting read-only command metadata...");
   renderSummary("Collection request in progress.", "warn");
 
@@ -549,15 +1164,29 @@ async function collectSelected() {
       { method: "POST" },
     );
     setCollectionResultHtml(formatCollectionResultHtml(result));
+    renderDiagnosticResult(result);
     renderSummary(summaryFromResult(result), result.success ? "ok" : "error");
   } catch (error) {
     setCollectionResultHtml(escapeHtml(formatCollectionError(error)));
+    renderDiagnosticResult({
+      success: false,
+      device_id: state.selectedDevice.device_id,
+      management_ip: state.selectedDevice.management_ip,
+      purpose: state.selectedPurpose,
+      commands: state.latestPlan?.commands || [],
+      error_summary: error.message,
+      stdout: "",
+      stderr: "",
+      parsed_ports: [],
+      interface_findings: {},
+    });
     renderSummary(error.message, "error");
   } finally {
-    nodes.collect.disabled = false;
+    nodes.collect.disabled = true;
     await loadAudit();
     await loadDashboard();
     await loadDiagnostics();
+    await loadPorts();
   }
 }
 
@@ -698,9 +1327,8 @@ function createDeviceNode(row) {
   meta.className = "device-node-meta";
   meta.textContent = `${topologyTierLabel(topologyTier(row))} · ${row.device.vendor} · ${row.device.role}`;
 
-  const badge = document.createElement("span");
-  badge.className = "device-node-badge";
-  badge.textContent = dashboardStatusLabel(row);
+  const badge = severityBadge(dashboardStatus(row), dashboardStatusLabel(row));
+  badge.classList.add("device-node-badge");
 
   const linkMeta = document.createElement("span");
   linkMeta.className = "device-node-links";
@@ -1315,7 +1943,7 @@ async function openTopologyEdge(edge) {
   const interfaceName = String(edge.local_interface || "").split(",")[0].trim();
   if (interfaceName) {
     await loadPortDetail(edge.source_device_id, interfaceName);
-    document.querySelector(".port-detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    document.querySelector(".detail-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 }
 
@@ -1395,9 +2023,8 @@ function renderAlarmFeed() {
     detail.className = "alarm-detail";
     detail.textContent = `${event.title}: ${event.detail}`;
 
-    const badge = document.createElement("span");
-    badge.className = "alarm-badge";
-    badge.textContent = event.severity;
+    const badge = severityBadge(event.severity);
+    badge.classList.add("alarm-badge");
 
     item.append(title, detail, badge);
     nodes.alarmFeed.append(item);
@@ -1458,13 +2085,13 @@ function dashboardStatusLabel(row) {
     return "normal";
   }
   if (status === "stale") {
-    return "stale";
+    return "Unknown";
   }
-  return status;
+  return SEVERITY[normalizeSeverity(status)]?.label || status;
 }
 
 function severityRank(severity) {
-  return { critical: 4, warning: 3, stale: 2, info: 1, ok: 0 }[severity] || 0;
+  return SEVERITY[normalizeSeverity(severity)]?.rank || 0;
 }
 
 function linkSummary(deviceId) {
@@ -1561,6 +2188,179 @@ function setCollectionResultHtml(value) {
     return;
   }
   nodes.collectionResult.innerHTML = value;
+}
+
+function renderDiagnosticResult(result) {
+  state.latestResult = result;
+  if (!result) {
+    state.rawOutput = "";
+    nodes.collectionSummary && (nodes.collectionSummary.innerHTML = '<div class="empty-state">No diagnostic result yet. Preview and run a read-only diagnostic to populate the parsed summary.</div>');
+    nodes.collectionMetrics && (nodes.collectionMetrics.innerHTML = '<div class="empty-state">No parsed metrics yet.</div>');
+    setCollectionResultText("No raw CLI output yet.");
+    if (nodes.resultMeta) {
+      nodes.resultMeta.textContent = "Parsed summary is shown before raw CLI output.";
+    }
+    return;
+  }
+
+  const deviceId = result.device?.device_id || result.device_id || state.selectedDevice?.device_id || "-";
+  const managementIp = result.device?.management_ip || result.management_ip || state.selectedDevice?.management_ip || "-";
+  const status = result.success ? resultSeverity(result) : "critical";
+  if (nodes.resultMeta) {
+    nodes.resultMeta.textContent = `${deviceId} (${managementIp}) - ${text(result.purpose)} - ${result.success ? "success" : "failure"}`;
+  }
+  renderResultSummary(result, status);
+  renderResultMetrics(result);
+  state.rawOutput = rawOutputFromResult(result);
+  renderRawOutput();
+  activateResultTab("summary");
+}
+
+function renderResultSummary(result, status) {
+  if (!nodes.collectionSummary) {
+    return;
+  }
+  nodes.collectionSummary.replaceChildren();
+  const header = document.createElement("div");
+  header.className = "result-summary-head";
+  header.append(severityBadge(status));
+  const title = document.createElement("strong");
+  title.textContent = result.success ? "Parsed Summary" : "Execution Failed";
+  header.prepend(title);
+
+  const list = document.createElement("ul");
+  list.className = "summary-list";
+  const findings = parsedSummaryLines(result);
+  for (const line of findings) {
+    const item = document.createElement("li");
+    item.textContent = line;
+    list.append(item);
+  }
+  nodes.collectionSummary.append(header, list);
+}
+
+function parsedSummaryLines(result) {
+  if (!result.success) {
+    return [
+      `Final result status: failure`,
+      `Key abnormal finding: ${text(result.error_summary || "Read-only command execution failed.")}`,
+      "Recommended next check: verify reachability, authentication, and collector support before retrying.",
+      `Related device: ${text(result.device?.device_id || result.device_id || state.selectedDevice?.device_id)}`,
+      `Execution time: ${new Date().toLocaleString()}`,
+      "Executed by: current web session",
+    ];
+  }
+  const ports = Array.isArray(result.parsed_ports) ? result.parsed_ports : [];
+  const findings = result.interface_findings || {};
+  const highErrors = Array.isArray(findings.high_error_ports) ? findings.high_error_ports : [];
+  const lowSpeed = Array.isArray(findings.low_speed_connected_ports) ? findings.low_speed_connected_ports : [];
+  const disabled = Array.isArray(findings.disabled_ports) ? findings.disabled_ports : [];
+  const selected = state.selectedPort;
+  const lines = [
+    "Final result status: read-only collection succeeded.",
+    highErrors.length
+      ? `Key abnormal findings: ${highErrors.length} high-error port(s), including ${highErrors[0].interface}.`
+      : "Key abnormal findings: no high-error ports in parsed output.",
+    lowSpeed.length
+      ? `Low-speed findings: ${lowSpeed.length} connected port(s) below expected speed.`
+      : "Normal findings: no low-speed connected ports found.",
+    disabled.length
+      ? `Disabled ports: ${disabled.length} disabled or errdisabled port(s).`
+      : "Disabled ports: no disabled/errdisabled ports reported in parsed output.",
+    `Related port: ${selected?.interface || "device scope"}`,
+    `Related VLAN: ${selected?.vlan || "not selected"}`,
+    `Related MAC address: ${listText(selected?.endpoint_macs)}`,
+    highErrors.length
+      ? "Recommended next check: inspect cable, endpoint NIC, and switchport counters."
+      : "Recommended next check: review Raw CLI only if technical evidence is needed.",
+    `Parsed ports: ${ports.length}`,
+    `Executed by: current web session`,
+  ];
+  return lines;
+}
+
+function renderResultMetrics(result) {
+  if (!nodes.collectionMetrics) {
+    return;
+  }
+  nodes.collectionMetrics.replaceChildren();
+  const ports = Array.isArray(result.parsed_ports) ? result.parsed_ports : [];
+  const findings = result.interface_findings || {};
+  const metrics = [
+    ["Commands", Array.isArray(result.commands) ? result.commands.length : 0],
+    ["Parsed Ports", ports.length],
+    ["High Error Ports", Array.isArray(findings.high_error_ports) ? findings.high_error_ports.length : 0],
+    ["Low Speed Ports", Array.isArray(findings.low_speed_connected_ports) ? findings.low_speed_connected_ports.length : 0],
+    ["Disabled Ports", Array.isArray(findings.disabled_ports) ? findings.disabled_ports.length : 0],
+    ["Stdout Bytes", result.stdout_bytes || String(result.stdout || "").length],
+    ["Stderr Bytes", result.stderr_bytes || String(result.stderr || "").length],
+  ];
+  const strip = document.createElement("div");
+  strip.className = "metric-strip result-metrics";
+  for (const [label, value] of metrics) {
+    const item = document.createElement("div");
+    item.className = "metric-card";
+    const strong = document.createElement("strong");
+    strong.textContent = text(value);
+    const span = document.createElement("span");
+    span.textContent = label;
+    item.append(strong, span);
+    strip.append(item);
+  }
+  nodes.collectionMetrics.append(strip);
+}
+
+function rawOutputFromResult(result) {
+  const lines = [
+    `Device : ${result.device?.device_id || result.device_id || state.selectedDevice?.device_id || "-"}`,
+    `IP     : ${result.device?.management_ip || result.management_ip || state.selectedDevice?.management_ip || "-"}`,
+    `Purpose: ${text(result.purpose)}`,
+    `Status : ${result.success ? "Success" : "Failure"}`,
+    `Commands: ${Array.isArray(result.commands) ? result.commands.join(" | ") : "-"}`,
+    "",
+    "------------------------------------------------------------",
+    result.stdout || "(no stdout)",
+  ];
+  if (result.stderr) {
+    lines.push("", "===== STDERR =====", result.stderr);
+  }
+  if (result.error_summary) {
+    lines.push("", "===== ERROR SUMMARY =====", result.error_summary);
+  }
+  return lines.join("\n");
+}
+
+function renderRawOutput() {
+  if (!nodes.collectionResult) {
+    return;
+  }
+  const query = state.rawSearchQuery;
+  const raw = state.rawOutput || "No raw CLI output yet.";
+  if (!query) {
+    nodes.collectionResult.innerHTML = colorizeStatusTokens(escapeHtml(raw));
+    return;
+  }
+  const escaped = escapeHtml(raw);
+  const pattern = new RegExp(`(${escapeRegExp(query)})`, "gi");
+  nodes.collectionResult.innerHTML = colorizeStatusTokens(escaped.replace(pattern, '<mark>$1</mark>'));
+}
+
+function resultSeverity(result) {
+  const findings = result.interface_findings || {};
+  if (Array.isArray(findings.high_error_ports) && findings.high_error_ports.length) {
+    return "critical";
+  }
+  if (Array.isArray(findings.low_speed_connected_ports) && findings.low_speed_connected_ports.length) {
+    return "warning";
+  }
+  if (Array.isArray(findings.disabled_ports) && findings.disabled_ports.length) {
+    return "warning";
+  }
+  return "normal";
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function formatCollectionResultHtml(result) {
@@ -1793,9 +2593,8 @@ async function loadDiagnostics() {
     title.className = "finding-title";
     const titleText = document.createElement("span");
     titleText.textContent = finding.interface ? `${finding.interface}: ${finding.title}` : finding.title;
-    const badge = document.createElement("span");
-    badge.className = "finding-severity";
-    badge.textContent = finding.severity;
+    const badge = severityBadge(finding.severity);
+    badge.classList.add("finding-severity");
     title.append(titleText, badge);
 
     const evidence = document.createElement("p");
@@ -1959,10 +2758,11 @@ async function loadAudit() {
       event.management_ip,
       event.purpose,
       commandText,
-      event.success ? "success" : "failure",
-      event.error_summary,
     ]);
-    row.children[5].className = event.success ? "status-ok" : "status-fail";
+    const resultCell = document.createElement("td");
+    resultCell.append(severityBadge(event.success ? "resolved" : "critical", event.success ? "Success" : "Failure"));
+    row.append(resultCell);
+    appendCells(row, [event.error_summary]);
     nodes.auditBody.append(row);
   }
 }
@@ -1972,6 +2772,26 @@ function appendCells(row, values) {
     const cell = document.createElement("td");
     cell.textContent = text(value);
     row.append(cell);
+  }
+}
+
+function activateResultTab(tab) {
+  state.activeResultTab = tab;
+  for (const button of document.querySelectorAll("[data-result-tab]")) {
+    button.classList.toggle("active", button.dataset.resultTab === tab);
+  }
+  for (const pane of document.querySelectorAll("[data-result-pane]")) {
+    pane.classList.toggle("active", pane.dataset.resultPane === tab);
+  }
+}
+
+function activateDetailTab(tab) {
+  state.activeDetailTab = tab;
+  for (const button of document.querySelectorAll("[data-detail-tab]")) {
+    button.classList.toggle("active", button.dataset.detailTab === tab);
+  }
+  for (const pane of document.querySelectorAll("[data-detail-pane]")) {
+    pane.classList.toggle("active", pane.dataset.detailPane === tab);
   }
 }
 
@@ -1996,6 +2816,41 @@ nodes.dashboardShowIssues?.addEventListener("click", () => {
 nodes.refreshAudit?.addEventListener("click", () => {
   loadAudit().catch((error) => setStatus(error.message, false));
 });
+nodes.portRefresh?.addEventListener("click", () => {
+  loadPorts().catch((error) => setStatus(error.message, false));
+});
+nodes.portStatusFilter?.addEventListener("change", () => {
+  state.portStatusFilter = nodes.portStatusFilter.value;
+  renderPortMatrix();
+});
+nodes.portModeFilter?.addEventListener("change", () => {
+  state.portModeFilter = nodes.portModeFilter.value;
+  renderPortMatrix();
+});
+nodes.portVlanFilter?.addEventListener("input", () => {
+  state.portVlanFilter = nodes.portVlanFilter.value.trim().toLowerCase();
+  renderPortMatrix();
+});
+nodes.portSearchInput?.addEventListener("input", () => {
+  state.portSearchQuery = nodes.portSearchInput.value.trim().toLowerCase();
+  renderPortMatrix();
+});
+nodes.rawSearchInput?.addEventListener("input", () => {
+  state.rawSearchQuery = nodes.rawSearchInput.value.trim();
+  renderRawOutput();
+});
+nodes.copyRawOutput?.addEventListener("click", () => {
+  navigator.clipboard?.writeText(state.rawOutput || "").then(
+    () => setStatus("Raw CLI output copied.", true),
+    () => setStatus("Raw CLI output could not be copied.", false),
+  );
+});
+for (const button of document.querySelectorAll("[data-result-tab]")) {
+  button.addEventListener("click", () => activateResultTab(button.dataset.resultTab));
+}
+for (const button of document.querySelectorAll("[data-detail-tab]")) {
+  button.addEventListener("click", () => activateDetailTab(button.dataset.detailTab));
+}
 nodes.checkDevice?.addEventListener("click", () => {
   checkSelectedDevice().catch((error) => renderSummary(error.message, "error"));
 });
@@ -2020,7 +2875,10 @@ nodes.diagnosePort?.addEventListener("click", () => {
 nodes.purposeSelect?.addEventListener("change", () => {
   state.selectedPurpose = nodes.purposeSelect.value;
   state.latestPlan = null;
+  state.previewReady = false;
+  state.previewAction = "collect";
   renderCommandPlan(null);
+  renderCommandPreview(null);
   if (nodes.collect) {
     nodes.collect.disabled = true;
   }

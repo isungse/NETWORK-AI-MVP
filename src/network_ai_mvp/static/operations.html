@@ -4,15 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Network AI MVP Operations</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body data-page="operations">
+  <body data-page="operations" class="operations-page">
     <header class="topbar">
       <div class="topbar-title">
-        <h1>Network AI MVP</h1>
+        <h1>Network Operations Console</h1>
         <p id="apiStatus" class="status-hidden">Checking API...</p>
       </div>
       <div class="topbar-actions">
+        <span class="topbar-meta" id="dashboardUpdated">Loading device health...</span>
         <a class="monitor-link" href="/">Device Map</a>
         <a class="monitor-link" href="/monitoring" target="_blank" rel="noreferrer">Monitoring</a>
         <div class="mode-stack" aria-label="Safety mode">
@@ -21,98 +23,229 @@
       </div>
     </header>
 
-    <main class="layout">
-      <section class="panel dashboard-panel" aria-labelledby="dashboardTitle">
-        <div class="panel-head">
-          <div>
-            <h2 id="dashboardTitle">Operations Dashboard</h2>
-            <span id="dashboardUpdated" class="muted">Loading device health...</span>
-          </div>
-          <div class="panel-actions">
-            <button id="dashboardShowAll" type="button">All Devices</button>
-            <button id="dashboardShowIssues" type="button">Issues Only</button>
-          </div>
+    <main class="console-shell">
+      <aside class="sidebar" aria-label="Main navigation">
+        <div class="sidebar-brand">
+          <span class="sidebar-kicker">Internal NMS</span>
+          <strong>Backbone &amp; L2 Ops</strong>
         </div>
-        <div class="health-cards" id="healthCards" aria-label="Device health summary"></div>
-        <div class="dashboard-grid">
-          <section class="dashboard-zone topology-zone" aria-labelledby="topologyTitle">
-            <div class="subpanel-head">
-              <h3 id="topologyTitle">Device Map</h3>
-              <span class="muted">Inventory-driven, read-only</span>
-            </div>
-            <div id="topologyMap" class="topology-map"></div>
-          </section>
-          <section class="dashboard-zone alarm-zone" aria-labelledby="alarmTitle">
-            <div class="subpanel-head">
-              <h3 id="alarmTitle">Action Feed</h3>
-              <span class="muted">Warnings, stale snapshots, failures</span>
-            </div>
-            <div id="alarmFeed" class="alarm-feed"></div>
-          </section>
+        <nav class="sidebar-nav">
+          <a class="sidebar-link active" href="#dashboardTitle">Dashboard</a>
+          <a class="sidebar-link" href="#inventoryTitle">Devices</a>
+          <a class="sidebar-link" href="#portMatrixTitle">Ports / Interfaces</a>
+          <a class="sidebar-link" href="#searchTitle">MAC Lookup</a>
+          <a class="sidebar-link" href="#previewTitle">Diagnostics</a>
+          <a class="sidebar-link" href="#alarmTitle">Alerts / Events</a>
+          <a class="sidebar-link" href="#auditTitle">Audit Logs</a>
+        </nav>
+        <div class="sidebar-note">
+          <span class="severity-badge severity-info"><span class="severity-dot"></span>Read-only</span>
+          <p>Diagnostics are allowlisted and audited before collection.</p>
         </div>
-      </section>
+      </aside>
 
-      <section class="panel inventory-panel" aria-labelledby="inventoryTitle">
-        <div class="panel-head">
-          <h2 id="inventoryTitle">Inventory</h2>
-          <div class="panel-actions">
-            <button id="checkDevice" type="button" disabled>CHECK</button>
-            <button id="refreshDevices" type="button">Refresh</button>
+      <div class="console-main">
+        <section class="panel dashboard-panel" aria-labelledby="dashboardTitle">
+          <div class="panel-head">
+            <div>
+              <h2 id="dashboardTitle">Operations Dashboard</h2>
+              <span class="muted">Abnormal devices and stale snapshots are prioritized.</span>
+            </div>
+            <div class="panel-actions">
+              <button id="dashboardShowAll" type="button" class="secondary-button">All Devices</button>
+              <button id="dashboardShowIssues" type="button" class="secondary-button">Issues Only</button>
+            </div>
           </div>
-        </div>
-        <section class="subpanel search-panel" aria-labelledby="searchTitle">
-          <div class="subpanel-head">
-            <h3 id="searchTitle">Operations Search</h3>
-            <span class="muted">Device / port / IP / MAC</span>
+          <div class="health-cards" id="healthCards" aria-label="Device health summary"></div>
+          <div class="dashboard-grid">
+            <section class="dashboard-zone topology-zone" aria-labelledby="topologyTitle">
+              <div class="subpanel-head">
+                <h3 id="topologyTitle">Device Map</h3>
+                <span class="muted">Inventory and latest parsed LLDP/CDP data</span>
+              </div>
+              <div id="topologyMap" class="topology-map"></div>
+            </section>
+            <section class="dashboard-zone alarm-zone" aria-labelledby="alarmTitle">
+              <div class="subpanel-head">
+                <h3 id="alarmTitle">Action Feed</h3>
+                <span class="muted">Down, critical, warning, and unknown states</span>
+              </div>
+              <div id="alarmFeed" class="alarm-feed"></div>
+            </section>
           </div>
-          <div class="search-row">
-            <label for="searchInput">Search</label>
-            <input id="searchInput" type="search" placeholder="Gi3/24, 172.16.33.111, 1c28.afc2.54ae" />
-            <button id="searchButton" type="button">Search</button>
+        </section>
+
+        <section class="panel inventory-panel" aria-labelledby="inventoryTitle">
+          <div class="panel-head">
+            <div>
+              <h2 id="inventoryTitle">Device Inventory</h2>
+              <span class="muted">Click a device to inspect details and ports.</span>
+            </div>
+            <div class="panel-actions">
+              <button id="checkDevice" type="button" disabled>Preview CHECK</button>
+              <button id="refreshDevices" type="button" class="secondary-button">Refresh</button>
+            </div>
           </div>
-          <div class="table-wrap search-wrap">
+
+          <section class="subpanel search-panel" aria-labelledby="searchTitle">
+            <div class="subpanel-head">
+              <h3 id="searchTitle">Operations Search</h3>
+              <span class="muted">Device / port / IP / MAC</span>
+            </div>
+            <div class="search-row">
+              <label for="searchInput">Search</label>
+              <input id="searchInput" type="search" placeholder="Gi3/24, 172.16.33.111, 1c28.afc2.54ae" />
+              <button id="searchButton" type="button">Search</button>
+            </div>
+            <div class="table-wrap search-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Target</th>
+                    <th>Source</th>
+                    <th>Summary</th>
+                  </tr>
+                </thead>
+                <tbody id="searchResultsBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <div class="table-wrap inventory-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Type</th>
-                  <th>Target</th>
-                  <th>Source</th>
-                  <th>Summary</th>
+                  <th>Status</th>
+                  <th>Device</th>
+                  <th>Host</th>
+                  <th>IP</th>
+                  <th>Vendor</th>
+                  <th>Model</th>
+                  <th>Role</th>
+                  <th>Access</th>
                 </tr>
               </thead>
-              <tbody id="searchResultsBody"></tbody>
+              <tbody id="devicesBody"></tbody>
             </table>
           </div>
         </section>
 
-        <section class="subpanel check-panel" aria-labelledby="checkTitle">
-          <div class="subpanel-head">
-            <h3 id="checkTitle">Network Check</h3>
-            <span class="muted">Read-only allowlist only</span>
+        <section class="panel port-matrix-panel" aria-labelledby="portMatrixTitle">
+          <div class="panel-head">
+            <div>
+              <h2 id="portMatrixTitle">Port Matrix View</h2>
+              <span id="portMatrixMeta" class="muted">Select a device to load latest parsed port state.</span>
+            </div>
+            <div class="panel-actions">
+              <button id="portRefresh" type="button" class="secondary-button">Refresh Ports</button>
+            </div>
+          </div>
+
+          <div id="portMatrixSummary" class="metric-strip" aria-label="Port status summary"></div>
+
+          <div class="filter-bar" aria-label="Port filters">
+            <label class="filter-control">
+              Status
+              <select id="portStatusFilter">
+                <option value="all">All</option>
+                <option value="error">Error</option>
+                <option value="down">Down</option>
+                <option value="disabled">Disabled</option>
+                <option value="up">Up</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </label>
+            <label class="filter-control">
+              Mode
+              <select id="portModeFilter">
+                <option value="all">All</option>
+                <option value="access">Access</option>
+                <option value="trunk">Trunk</option>
+              </select>
+            </label>
+            <label class="filter-control">
+              VLAN
+              <input id="portVlanFilter" type="search" placeholder="11, routed" />
+            </label>
+            <label class="filter-control wide">
+              Description / Port
+              <input id="portSearchInput" type="search" placeholder="Et3, uplink, outpatient" />
+            </label>
+          </div>
+
+          <div id="portMatrix" class="port-matrix" aria-live="polite"></div>
+
+          <details class="port-table-details">
+            <summary>Table view for detailed analysis</summary>
+            <div class="table-wrap port-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Port</th>
+                    <th>Status</th>
+                    <th>Mode</th>
+                    <th>VLAN</th>
+                    <th>Speed</th>
+                    <th>Duplex</th>
+                    <th>CRC/FCS</th>
+                    <th>Input/Rx</th>
+                    <th>MACs</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody id="portTableBody"></tbody>
+              </table>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel result-panel" aria-labelledby="resultTitle">
+          <div class="panel-head">
+            <div>
+              <h2 id="resultTitle">Diagnostic Result</h2>
+              <span id="resultMeta" class="muted">Parsed summary is shown before raw CLI output.</span>
+            </div>
+            <div class="tab-list" role="tablist" aria-label="Diagnostic result views">
+              <button id="resultTabSummary" type="button" class="tab-button active" data-result-tab="summary">Summary</button>
+              <button id="resultTabMetrics" type="button" class="tab-button" data-result-tab="metrics">Metrics</button>
+              <button id="resultTabRaw" type="button" class="tab-button" data-result-tab="raw">Raw CLI</button>
+            </div>
+          </div>
+          <div class="result-split">
+            <section id="collectionSummary" class="result-pane active" data-result-pane="summary" aria-labelledby="resultTabSummary">
+              <div class="empty-state">No diagnostic result yet. Preview and run a read-only diagnostic to populate the parsed summary.</div>
+            </section>
+            <section id="collectionMetrics" class="result-pane" data-result-pane="metrics" aria-labelledby="resultTabMetrics">
+              <div class="empty-state">No parsed metrics yet.</div>
+            </section>
+            <section id="collectionRawPanel" class="result-pane raw-pane" data-result-pane="raw" aria-labelledby="resultTabRaw">
+              <div class="raw-toolbar">
+                <label for="rawSearchInput">Search raw output</label>
+                <input id="rawSearchInput" type="search" placeholder="error, CRC, timeout" />
+                <button id="copyRawOutput" type="button" class="secondary-button">Copy</button>
+              </div>
+              <pre id="collectionResult" class="result-box">No raw CLI output yet.</pre>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel check-panel" aria-labelledby="checkTitle">
+          <div class="panel-head">
+            <div>
+              <h2 id="checkTitle">Network Check</h2>
+              <span class="muted">Read-only allowlist only</span>
+            </div>
           </div>
           <div id="checkResults" class="check-list"></div>
         </section>
 
-        <div class="table-wrap inventory-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Device</th>
-                <th>Host</th>
-                <th>IP</th>
-                <th>Vendor</th>
-                <th>Role</th>
-                <th>Access</th>
-              </tr>
-            </thead>
-            <tbody id="devicesBody"></tbody>
-          </table>
-        </div>
-
-        <section class="subpanel neighbors-panel inventory-neighbors-panel" aria-labelledby="neighborsTitle">
-          <div class="subpanel-head">
-            <h3 id="neighborsTitle">Connected Neighbors</h3>
-            <span id="neighborsNote" class="muted">Reference only</span>
+        <section class="panel neighbors-panel inventory-neighbors-panel" aria-labelledby="neighborsTitle">
+          <div class="panel-head">
+            <div>
+              <h2 id="neighborsTitle">Connected Neighbors</h2>
+              <span id="neighborsNote" class="muted">Reference only</span>
+            </div>
           </div>
           <div class="table-wrap neighbors-wrap">
             <table class="neighbors-table">
@@ -133,74 +266,98 @@
             </table>
           </div>
         </section>
-      </section>
 
-      <section class="panel detail-panel" aria-labelledby="detailTitle">
-        <div class="panel-head">
-          <h2 id="detailTitle">Device Detail</h2>
-          <span id="selectedDeviceId" class="muted">No device selected</span>
-        </div>
-        <dl id="deviceFacts" class="facts"></dl>
-
-        <div class="control-row">
-          <label for="purposeSelect">Purpose</label>
-          <select id="purposeSelect" disabled></select>
-          <button id="loadPlan" type="button" disabled>Plan</button>
-          <button id="collect" type="button" disabled>Collect</button>
-        </div>
-
-        <div class="split">
-          <section class="subpanel" aria-labelledby="planTitle">
-            <h3 id="planTitle">Command Plan</h3>
-            <ol id="commandPlan" class="command-list"></ol>
-          </section>
-          <section class="subpanel" aria-labelledby="summaryTitle">
-            <h3 id="summaryTitle">Diagnostic Summary</h3>
-            <div id="diagnosticSummary" class="summary-box">Select a device.</div>
-            <div id="diagnosticFindings" class="finding-list"></div>
-          </section>
-        </div>
-
-        <section class="subpanel port-detail-panel" aria-labelledby="portDetailTitle">
-          <div class="subpanel-head">
-            <h3 id="portDetailTitle">Port Detail</h3>
-            <button id="diagnosePort" type="button" disabled>Diagnose This Port</button>
+        <section class="panel audit-panel" aria-labelledby="auditTitle">
+          <div class="panel-head">
+            <div>
+              <h2 id="auditTitle">Audit Log</h2>
+              <span class="muted">Command execution history and collection failures.</span>
+            </div>
+            <button id="refreshAudit" type="button" class="secondary-button">Refresh</button>
           </div>
+          <div class="table-wrap audit-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Device</th>
+                  <th>IP</th>
+                  <th>Purpose</th>
+                  <th>Commands</th>
+                  <th>Result</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody id="auditBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <aside class="panel detail-panel" aria-labelledby="detailTitle">
+        <div class="panel-head detail-head">
+          <div>
+            <h2 id="detailTitle">Detail Panel</h2>
+            <span id="selectedDeviceId" class="muted">No device selected</span>
+          </div>
+          <span id="detailSeverity" class="severity-badge severity-unknown"><span class="severity-dot"></span>Unknown</span>
+        </div>
+
+        <div class="tab-list detail-tabs" role="tablist" aria-label="Detail panel views">
+          <button type="button" class="tab-button active" data-detail-tab="summary">Summary</button>
+          <button type="button" class="tab-button" data-detail-tab="health">Health</button>
+          <button type="button" class="tab-button" data-detail-tab="vlan">VLAN / MAC</button>
+          <button type="button" class="tab-button" data-detail-tab="diagnostics">Diagnostics</button>
+          <button type="button" class="tab-button" data-detail-tab="raw">Raw CLI</button>
+        </div>
+
+        <section class="detail-pane active" data-detail-pane="summary">
+          <h3>Device Summary</h3>
+          <dl id="deviceFacts" class="facts"></dl>
+          <h3>Selected Port</h3>
           <dl id="portDetailFacts" class="facts compact-facts"></dl>
           <div id="portDetailState" class="summary-box">Search for a port, IP, MAC, or device to inspect stored parsed state.</div>
         </section>
-      </section>
 
-      <section class="panel result-panel" aria-labelledby="resultTitle">
-        <div class="panel-head">
-          <h2 id="resultTitle">Collection Result</h2>
-          <span class="muted">Raw read-only command output</span>
-        </div>
-        <pre id="collectionResult" class="result-box">No collection attempted.</pre>
-      </section>
+        <section class="detail-pane" data-detail-pane="health">
+          <h3>Port Health</h3>
+          <div id="portHealthSummary" class="detail-section empty-state">Select a port to review counters and status.</div>
+          <h3>Device Diagnostics</h3>
+          <div id="diagnosticSummary" class="summary-box">Select a device.</div>
+          <div id="diagnosticFindings" class="finding-list"></div>
+        </section>
 
-      <section class="panel audit-panel" aria-labelledby="auditTitle">
-        <div class="panel-head">
-          <h2 id="auditTitle">Audit Log</h2>
-          <button id="refreshAudit" type="button">Refresh</button>
+        <section class="detail-pane" data-detail-pane="vlan">
+          <h3>VLAN / MAC</h3>
+          <div id="vlanMacSummary" class="detail-section empty-state">Select a parsed port to inspect VLAN, mode, endpoints, and neighbors.</div>
+        </section>
+
+        <section class="detail-pane" data-detail-pane="diagnostics">
+          <h3 id="previewTitle">Diagnostic Preview</h3>
+          <div class="control-row command-controls">
+            <label for="purposeSelect">Purpose</label>
+            <select id="purposeSelect" disabled></select>
+            <button id="loadPlan" type="button" disabled>Preview</button>
+          </div>
+          <div id="commandPreview" class="command-preview empty-state">Select a device and purpose to preview read-only commands before execution.</div>
+          <section class="command-plan-section" aria-labelledby="planTitle">
+            <h3 id="planTitle">Commands to Run</h3>
+            <ol id="commandPlan" class="command-list"></ol>
+          </section>
+        </section>
+
+        <section class="detail-pane" data-detail-pane="raw">
+          <h3>Raw CLI Access</h3>
+          <div class="detail-section">
+            <p class="muted">Raw CLI output is available in the Diagnostic Result panel after execution. It is separated from the parsed summary and remains collapsed behind the Raw CLI tab by default.</p>
+          </div>
+        </section>
+
+        <div class="detail-actions">
+          <button id="diagnosePort" type="button" class="secondary-button" disabled>Preview Port Diagnostic</button>
+          <button id="collect" type="button" disabled>Run Diagnostic</button>
         </div>
-        <div class="table-wrap audit-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Device</th>
-                <th>IP</th>
-                <th>Purpose</th>
-                <th>Commands</th>
-                <th>Result</th>
-                <th>Error</th>
-              </tr>
-            </thead>
-            <tbody id="auditBody"></tbody>
-          </table>
-        </div>
-      </section>
+      </aside>
     </main>
 
     <script src="/static/app.js" defer></script>
