@@ -9,6 +9,7 @@ const state = {
   topologyTierFilter: "all",
   topologyZoom: 1,
   topologyAutoFit: false,
+  topologyViewportHeight: 520,
   topologyStreamStarted: false,
   topologyStreamStale: false,
   selectedDevice: null,
@@ -17,7 +18,7 @@ const state = {
   selectedPort: null,
   latestPorts: [],
   latestPortSummary: {},
-  portStatusFilter: "all",
+  portStatusFilter: "up",
   portModeFilter: "all",
   portVlanFilter: "",
   portSearchQuery: "",
@@ -28,6 +29,7 @@ const state = {
   rawSearchQuery: "",
   activeResultTab: "summary",
   activeDetailTab: "summary",
+  sidebarManualUntil: 0,
 };
 
 const page = document.body.dataset.page || "operations";
@@ -106,13 +108,15 @@ const SEVERITY = {
 
 const TOPOLOGY_LAYOUT = {
   nodeWidth: 220,
-  nodeHeight: 112,
+  nodeHeight: 88,
   nodeGap: 96,
   tierRowGap: 48,
   tierGap: 190,
   paddingX: 64,
   paddingY: 48,
 };
+const TOPOLOGY_VIEWPORT_MIN_HEIGHT = 420;
+const TOPOLOGY_VIEWPORT_MAX_HEIGHT = 980;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -1292,6 +1296,7 @@ function renderTopologyMap() {
   const controls = createTopologyControls();
   const viewport = document.createElement("div");
   viewport.className = "topology-tree-viewport";
+  applyTopologyViewportHeight(viewport);
   const canvas = document.createElement("div");
   canvas.className = "topology-canvas topology-tree-canvas";
   canvas.style.setProperty("--topology-zoom", String(state.topologyZoom));
@@ -1303,8 +1308,89 @@ function renderTopologyMap() {
 
   canvas.append(svg, nodeLayer);
   viewport.append(canvas);
-  nodes.topologyMap.append(controls, viewport);
+  const resizeHandle = createTopologyResizeHandle(viewport);
+  nodes.topologyMap.append(controls, viewport, resizeHandle);
   requestAnimationFrame(() => renderTopologyTree(viewport, canvas, svg, nodeLayer, rows));
+}
+
+function applyTopologyViewportHeight(viewport) {
+  const height = Math.max(
+    TOPOLOGY_VIEWPORT_MIN_HEIGHT,
+    Math.min(TOPOLOGY_VIEWPORT_MAX_HEIGHT, state.topologyViewportHeight),
+  );
+  state.topologyViewportHeight = height;
+  viewport.style.height = `${height}px`;
+}
+
+function createTopologyResizeHandle(viewport) {
+  const handle = document.createElement("div");
+  handle.className = "topology-resize-handle";
+  handle.setAttribute("role", "separator");
+  handle.setAttribute("aria-orientation", "horizontal");
+  handle.setAttribute("aria-label", "Resize Tree layout");
+  handle.setAttribute("aria-valuemin", String(TOPOLOGY_VIEWPORT_MIN_HEIGHT));
+  handle.setAttribute("aria-valuemax", String(TOPOLOGY_VIEWPORT_MAX_HEIGHT));
+  handle.tabIndex = 0;
+  handle.title = "Resize Tree layout";
+  updateTopologyResizeHandleValue(handle);
+
+  let startY = 0;
+  let startHeight = state.topologyViewportHeight;
+
+  const setHeight = (height) => {
+    state.topologyViewportHeight = Math.max(
+      TOPOLOGY_VIEWPORT_MIN_HEIGHT,
+      Math.min(TOPOLOGY_VIEWPORT_MAX_HEIGHT, Math.round(height)),
+    );
+    viewport.style.height = `${state.topologyViewportHeight}px`;
+    updateTopologyResizeHandleValue(handle);
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    startY = event.clientY;
+    startHeight = viewport.getBoundingClientRect().height || state.topologyViewportHeight;
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("dragging");
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!handle.classList.contains("dragging")) {
+      return;
+    }
+    setHeight(startHeight + event.clientY - startY);
+  });
+  handle.addEventListener("pointerup", (event) => {
+    handle.releasePointerCapture(event.pointerId);
+    handle.classList.remove("dragging");
+    if (state.topologyAutoFit) {
+      renderTopologyMap();
+    }
+  });
+  handle.addEventListener("pointercancel", () => {
+    handle.classList.remove("dragging");
+  });
+  handle.addEventListener("keydown", (event) => {
+    const step = event.shiftKey ? 80 : 24;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHeight(state.topologyViewportHeight - step);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHeight(state.topologyViewportHeight + step);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setHeight(TOPOLOGY_VIEWPORT_MIN_HEIGHT);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setHeight(TOPOLOGY_VIEWPORT_MAX_HEIGHT);
+    }
+  });
+
+  return handle;
+}
+
+function updateTopologyResizeHandleValue(handle) {
+  handle.setAttribute("aria-valuenow", String(state.topologyViewportHeight));
 }
 
 function createDeviceNode(row) {
@@ -1327,14 +1413,11 @@ function createDeviceNode(row) {
   meta.className = "device-node-meta";
   meta.textContent = `${topologyTierLabel(topologyTier(row))} · ${row.device.vendor} · ${row.device.role}`;
 
-  const badge = severityBadge(dashboardStatus(row), dashboardStatusLabel(row));
-  badge.classList.add("device-node-badge");
-
   const linkMeta = document.createElement("span");
   linkMeta.className = "device-node-links";
   linkMeta.textContent = linkSummary(row.device.device_id);
 
-  button.append(name, meta, badge, linkMeta);
+  button.append(name, meta, linkMeta);
   return button;
 }
 
@@ -1823,11 +1906,9 @@ function topologyEdgeGeometry(source, target) {
     const x2 = sourceBeforeTarget ? target.x : target.x + TOPOLOGY_LAYOUT.nodeWidth;
     const y1 = source.y + TOPOLOGY_LAYOUT.nodeHeight / 2;
     const y2 = target.y + TOPOLOGY_LAYOUT.nodeHeight / 2;
-    const curve = Math.max(Math.abs(x2 - x1) * 0.35, 42);
-    const c1 = sourceBeforeTarget ? x1 + curve : x1 - curve;
-    const c2 = sourceBeforeTarget ? x2 - curve : x2 + curve;
+    const midX = x1 + (x2 - x1) / 2;
     return {
-      path: `M ${x1} ${y1} C ${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`,
+      path: y1 === y2 ? `M ${x1} ${y1} H ${x2}` : `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`,
       labelX: (x1 + x2) / 2,
       labelY: y1 - 12,
     };
@@ -1837,11 +1918,12 @@ function topologyEdgeGeometry(source, target) {
   const y1 = source.y + TOPOLOGY_LAYOUT.nodeHeight;
   const x2 = target.x + TOPOLOGY_LAYOUT.nodeWidth / 2;
   const y2 = target.y;
-  const curve = Math.max(Math.abs(y2 - y1) * 0.45, 34);
+  const gap = Math.max(0, y2 - y1);
+  const midY = y1 + Math.max(24, Math.min(gap / 2, 72));
   return {
-    path: `M ${x1} ${y1} C ${x1} ${y1 + curve}, ${x2} ${y2 - curve}, ${x2} ${y2}`,
+    path: x1 === x2 ? `M ${x1} ${y1} V ${y2}` : `M ${x1} ${y1} V ${midY} H ${x2} V ${y2}`,
     labelX: (x1 + x2) / 2,
-    labelY: (y1 + y2) / 2,
+    labelY: midY,
   };
 }
 
@@ -2795,6 +2877,56 @@ function activateDetailTab(tab) {
   }
 }
 
+function activateSidebarLink(hash, { manual = false } = {}) {
+  const targetHash = hash || "#dashboardTitle";
+  if (manual) {
+    state.sidebarManualUntil = Date.now() + 1200;
+  }
+  for (const link of document.querySelectorAll(".sidebar-link")) {
+    const isActive = link.getAttribute("href") === targetHash;
+    link.classList.toggle("active", isActive);
+    if (isActive) {
+      link.setAttribute("aria-current", "page");
+    } else {
+      link.removeAttribute("aria-current");
+    }
+  }
+}
+
+function setupSidebarNavigation() {
+  const links = Array.from(document.querySelectorAll(".sidebar-link"));
+  if (!links.length) {
+    return;
+  }
+  for (const link of links) {
+    link.addEventListener("click", () => activateSidebarLink(link.getAttribute("href"), { manual: true }));
+  }
+  activateSidebarLink(window.location.hash || links[0].getAttribute("href"));
+  if (!("IntersectionObserver" in window)) {
+    return;
+  }
+  const targets = links
+    .map((link) => document.querySelector(link.getAttribute("href")))
+    .filter(Boolean);
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (Date.now() < state.sidebarManualUntil) {
+        return;
+      }
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
+      if (visible?.target?.id) {
+        activateSidebarLink(`#${visible.target.id}`);
+      }
+    },
+    { rootMargin: "-72px 0px -62% 0px", threshold: [0.1, 0.35, 0.6] },
+  );
+  for (const target of targets) {
+    observer.observe(target);
+  }
+}
+
 nodes.refreshDevices?.addEventListener("click", () => {
   loadDevices().catch((error) => setStatus(error.message, false));
 });
@@ -2884,6 +3016,8 @@ nodes.purposeSelect?.addEventListener("change", () => {
   }
   loadCommandPlan().catch((error) => renderSummary(error.message, "error"));
 });
+setupSidebarNavigation();
+
 window.addEventListener("resize", () => {
   renderTopologyMap();
 });

@@ -9,6 +9,8 @@
   --subtle: #edf2f7;
   --accent: #36556f;
   --accent-strong: #243b53;
+  --nav-active-bg: #1f3a5f;
+  --nav-active-text: #ffffff;
   --info: #2563a7;
   --warn: #a16207;
   --danger: #b42318;
@@ -418,6 +420,7 @@ select {
 
 .topology-tree-viewport {
   min-height: 720px;
+  max-height: 980px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background:
@@ -425,6 +428,37 @@ select {
     repeating-linear-gradient(0deg, transparent 0, transparent 31px, rgba(31, 58, 73, 0.045) 32px),
     repeating-linear-gradient(90deg, transparent 0, transparent 31px, rgba(31, 58, 73, 0.045) 32px);
   overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.topology-resize-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 16px;
+  margin-top: -6px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: #f8fafc;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.topology-resize-handle::before {
+  width: 72px;
+  height: 3px;
+  border-radius: 999px;
+  background: #9aa7b3;
+  content: "";
+}
+
+.topology-resize-handle:hover,
+.topology-resize-handle:focus,
+.topology-resize-handle.dragging {
+  border-color: var(--accent);
+  background: #eef4f8;
+  outline: none;
 }
 
 .topology-canvas {
@@ -447,11 +481,13 @@ select {
 
 .topology-link {
   fill: none;
-  stroke-linecap: round;
+  stroke-linecap: square;
+  stroke-linejoin: round;
   cursor: pointer;
   pointer-events: visibleStroke;
-  opacity: 0.55;
+  opacity: 0.62;
   transition: stroke 160ms ease, stroke-width 160ms ease, opacity 160ms ease;
+  vector-effect: non-scaling-stroke;
 }
 
 .topology-link:hover,
@@ -460,12 +496,12 @@ select {
 }
 
 .topology-link.reference {
-  stroke-dasharray: 7 5;
+  stroke-dasharray: 5 4;
 }
 
 .topology-link.stale {
   opacity: 0.72;
-  stroke-dasharray: 7 5;
+  stroke-dasharray: 5 4;
 }
 
 .topology-link.health-normal {
@@ -508,13 +544,13 @@ select {
 
 .device-node {
   display: grid;
-  gap: 6px;
-  min-height: 112px;
+  gap: 4px;
+  min-height: 88px;
   border: 1px solid var(--line);
   border-left-width: 5px;
   background: #ffffff;
   color: var(--ink);
-  padding: 14px 16px;
+  padding: 10px 14px;
   text-align: left;
 }
 
@@ -565,18 +601,6 @@ select {
   color: var(--muted);
   font-size: 12.5px;
   overflow-wrap: anywhere;
-}
-
-.device-node-badge {
-  justify-self: start;
-  margin-top: 3px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: #31414c;
-  font-size: 11px;
-  font-weight: 800;
-  padding: 2px 6px;
-  text-transform: uppercase;
 }
 
 .device-node-links {
@@ -1132,10 +1156,21 @@ tr.device-row.selected {
   text-decoration: none;
 }
 
-.sidebar-link.active,
 .sidebar-link:hover {
   background: #eef4f8;
   color: var(--accent-strong);
+}
+
+.sidebar-link.active,
+.sidebar-link[aria-current="page"] {
+  background: var(--nav-active-bg);
+  color: var(--nav-active-text);
+}
+
+.sidebar-link.active:hover,
+.sidebar-link[aria-current="page"]:hover {
+  background: #172f4f;
+  color: var(--nav-active-text);
 }
 
 .sidebar-note {
@@ -1247,7 +1282,6 @@ tr.device-row.selected {
 }
 
 .operations-page .topology-tree-viewport {
-  height: 520px;
   min-height: 420px;
 }
 
