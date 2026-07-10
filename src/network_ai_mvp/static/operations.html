@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Network AI MVP Operations</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260710-4" />
   </head>
   <body data-page="operations" class="operations-page">
     <header class="topbar">
@@ -45,6 +45,35 @@
       </aside>
 
       <div class="console-main">
+        <section id="selectedDeviceOverview" class="selected-device-overview" aria-labelledby="selectedDeviceTitle" aria-live="polite" aria-busy="true">
+          <div class="selected-device-primary">
+            <span class="section-kicker">선택 스위치</span>
+            <div class="selected-device-heading">
+              <div>
+                <h2 id="selectedDeviceTitle">장비 정보를 불러오는 중입니다</h2>
+                <p id="selectedDeviceSubtitle" class="selected-device-subtitle">인벤토리와 최근 수집 상태를 확인하고 있습니다.</p>
+              </div>
+              <span id="overviewSeverity" class="severity-badge severity-unknown"><span class="severity-dot"></span>확인 중</span>
+            </div>
+            <dl class="selected-device-meta" aria-label="선택 스위치 핵심 정보">
+              <div><dt>관리 IP</dt><dd id="overviewIp">-</dd></div>
+              <div><dt>제조사 / 모델</dt><dd id="overviewPlatform">-</dd></div>
+              <div><dt>역할</dt><dd id="overviewRole">-</dd></div>
+              <div><dt>최근 관측</dt><dd id="overviewLastSeen">-</dd></div>
+            </dl>
+          </div>
+          <div class="selected-device-actions">
+            <a class="overview-link" href="#portMatrixTitle">포트 상태 보기</a>
+            <button id="checkDevice" type="button" disabled>CHECK 미리보기</button>
+          </div>
+          <div class="selected-device-health" id="selectedDeviceHealth" aria-label="선택 스위치 상태 요약">
+            <div class="overview-metric"><span>전체 포트</span><strong id="overviewPortTotal">-</strong></div>
+            <div class="overview-metric metric-ok"><span>정상</span><strong id="overviewPortUp">-</strong></div>
+            <div class="overview-metric metric-danger"><span>주의 필요</span><strong id="overviewPortIssues">-</strong></div>
+            <div class="overview-metric metric-warn"><span>진단 항목</span><strong id="overviewFindingCount">-</strong></div>
+          </div>
+        </section>
+
         <section class="panel dashboard-panel" aria-labelledby="dashboardTitle">
           <div class="panel-head">
             <div>
@@ -82,7 +111,6 @@
               <span class="muted">Click a device to inspect details and ports.</span>
             </div>
             <div class="panel-actions">
-              <button id="checkDevice" type="button" disabled>Preview CHECK</button>
               <button id="refreshDevices" type="button" class="secondary-button">Refresh</button>
             </div>
           </div>
@@ -148,11 +176,11 @@
             <label class="filter-control">
               Status
               <select id="portStatusFilter">
-                <option value="all">All</option>
+                <option value="all" selected>All</option>
                 <option value="error">Error</option>
                 <option value="down">Down</option>
                 <option value="disabled">Disabled</option>
-                <option value="up" selected>Up</option>
+                <option value="up">Up</option>
                 <option value="unknown">Unknown</option>
               </select>
             </label>
@@ -360,6 +388,6 @@
       </aside>
     </main>
 
-    <script src="/static/app.js" defer></script>
+    <script src="/static/app.js?v=20260710-4" defer></script>
   </body>
 </html>

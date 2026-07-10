@@ -18,7 +18,7 @@ const state = {
   selectedPort: null,
   latestPorts: [],
   latestPortSummary: {},
-  portStatusFilter: "up",
+  portStatusFilter: "all",
   portModeFilter: "all",
   portVlanFilter: "",
   portSearchQuery: "",
@@ -30,6 +30,9 @@ const state = {
   activeResultTab: "summary",
   activeDetailTab: "summary",
   sidebarManualUntil: 0,
+  selectionRequestId: 0,
+  selectionLoading: true,
+  selectedDiagnostics: null,
 };
 
 const page = document.body.dataset.page || "operations";
@@ -42,6 +45,18 @@ const nodes = {
   alarmFeed: document.querySelector("#alarmFeed"),
   dashboardShowAll: document.querySelector("#dashboardShowAll"),
   dashboardShowIssues: document.querySelector("#dashboardShowIssues"),
+  selectedDeviceOverview: document.querySelector("#selectedDeviceOverview"),
+  selectedDeviceTitle: document.querySelector("#selectedDeviceTitle"),
+  selectedDeviceSubtitle: document.querySelector("#selectedDeviceSubtitle"),
+  overviewSeverity: document.querySelector("#overviewSeverity"),
+  overviewIp: document.querySelector("#overviewIp"),
+  overviewPlatform: document.querySelector("#overviewPlatform"),
+  overviewRole: document.querySelector("#overviewRole"),
+  overviewLastSeen: document.querySelector("#overviewLastSeen"),
+  overviewPortTotal: document.querySelector("#overviewPortTotal"),
+  overviewPortUp: document.querySelector("#overviewPortUp"),
+  overviewPortIssues: document.querySelector("#overviewPortIssues"),
+  overviewFindingCount: document.querySelector("#overviewFindingCount"),
   devicesBody: document.querySelector("#devicesBody"),
   selectedDeviceId: document.querySelector("#selectedDeviceId"),
   deviceFacts: document.querySelector("#deviceFacts"),
@@ -105,6 +120,10 @@ const SEVERITY = {
   normal: { label: "Normal", rank: 2, title: "No current abnormal condition" },
   resolved: { label: "Resolved", rank: 1, title: "Issue has been resolved" },
 };
+
+const ACTION_FEED_SUPPRESSED_FINDING_TITLES = new Set([
+  "Temporary insecure access method",
+]);
 
 const TOPOLOGY_LAYOUT = {
   nodeWidth: 220,
@@ -249,6 +268,10 @@ function renderDevices() {
     const row = document.createElement("tr");
     row.className = "device-row";
     row.dataset.deviceId = device.device_id;
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.setAttribute("aria-label", `${device.hostname || device.device_id} 스위치 선택`);
+    row.setAttribute("aria-selected", state.selectedDevice?.device_id === device.device_id ? "true" : "false");
     if (state.selectedDevice?.device_id === device.device_id) {
       row.classList.add("selected");
     }
@@ -264,9 +287,79 @@ function renderDevices() {
       device.role,
       device.access_method,
     ]);
-    row.addEventListener("click", () => selectDevice(device.device_id));
+    row.addEventListener("click", () => {
+      selectDevice(device.device_id).catch((error) => setStatus(error.message, false));
+    });
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectDevice(device.device_id).catch((error) => setStatus(error.message, false));
+      }
+    });
     nodes.devicesBody.append(row);
   }
+}
+
+function selectedDashboardRow() {
+  return state.dashboardDevices.find((item) => item.device.device_id === state.selectedDevice?.device_id) || null;
+}
+
+function formatObservedAt(value) {
+  if (!value) {
+    return "수집 데이터 없음";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
+function renderSelectedDeviceOverview() {
+  if (!nodes.selectedDeviceOverview) {
+    return;
+  }
+  const device = state.selectedDevice;
+  nodes.selectedDeviceOverview.setAttribute("aria-busy", state.selectionLoading ? "true" : "false");
+  nodes.selectedDeviceOverview.classList.toggle("is-loading", state.selectionLoading);
+  if (!device) {
+    nodes.selectedDeviceTitle.textContent = "스위치를 선택하세요";
+    nodes.selectedDeviceSubtitle.textContent = "토폴로지 또는 장비 목록에서 스위치를 선택하면 핵심 상태가 표시됩니다.";
+    setSeverityBadge(nodes.overviewSeverity, "unknown", "미선택");
+    for (const node of [nodes.overviewIp, nodes.overviewPlatform, nodes.overviewRole, nodes.overviewLastSeen,
+      nodes.overviewPortTotal, nodes.overviewPortUp, nodes.overviewPortIssues, nodes.overviewFindingCount]) {
+      if (node) node.textContent = "-";
+    }
+    return;
+  }
+
+  const dashboardRow = selectedDashboardRow();
+  const ports = state.latestPorts;
+  const normalPorts = ports.filter((port) => portSeverity(port) === "normal").length;
+  const issuePorts = ports.filter((port) => ["critical", "down", "maintenance", "unknown"].includes(portSeverity(port))).length;
+  const findingCount = Math.max(
+    Array.isArray(state.selectedDiagnostics?.findings) ? state.selectedDiagnostics.findings.length : 0,
+    Number(dashboardRow?.device?.finding_count || 0),
+  );
+  const severity = dashboardRow ? dashboardStatus(dashboardRow) : deviceStatus(device);
+  const observedAt = dashboardRow?.device?.last_seen || state.latestPorts[0]?.source_timestamp;
+
+  nodes.selectedDeviceTitle.textContent = device.hostname || device.device_id;
+  nodes.selectedDeviceSubtitle.textContent = `${device.device_id} · ${isCollectable(device) ? "읽기 전용 진단 가능" : "진단 수집 미지원"}`;
+  setSeverityBadge(nodes.overviewSeverity, severity, state.selectionLoading ? "상태 갱신 중" : SEVERITY[normalizeSeverity(severity)].label);
+  nodes.overviewIp.textContent = text(device.management_ip);
+  nodes.overviewPlatform.textContent = `${text(device.vendor).toUpperCase()} / ${text(device.platform)}`;
+  nodes.overviewRole.textContent = text(device.role);
+  nodes.overviewLastSeen.textContent = formatObservedAt(observedAt);
+  nodes.overviewPortTotal.textContent = state.selectionLoading ? "…" : String(ports.length);
+  nodes.overviewPortUp.textContent = state.selectionLoading ? "…" : String(normalPorts);
+  nodes.overviewPortIssues.textContent = state.selectionLoading ? "…" : String(issuePorts);
+  nodes.overviewFindingCount.textContent = state.selectionLoading ? "…" : String(findingCount);
 }
 
 function renderDeviceFacts(device) {
@@ -301,6 +394,7 @@ function renderDeviceFacts(device) {
     dd.textContent = text(value);
     nodes.deviceFacts.append(dt, dd);
   }
+  renderSelectedDeviceOverview();
 }
 
 async function loadDevices() {
@@ -311,21 +405,32 @@ async function loadDevices() {
   } else if (state.selectedDevice) {
     state.selectedDevice = state.devices.find((item) => item.device_id === state.selectedDevice.device_id) || null;
   }
+  const requestId = ++state.selectionRequestId;
+  state.selectionLoading = Boolean(state.selectedDevice);
+  state.selectedDiagnostics = null;
   renderDevices();
   renderDeviceFacts(state.selectedDevice);
   renderCheckResults(null);
   updateCheckButton();
   await loadDashboard();
-  await loadDiagnostics();
-  await loadNeighbors();
-  await loadPurposes();
-  await loadPorts();
+  renderDeviceFacts(state.selectedDevice);
+  await Promise.all([
+    loadDiagnostics(requestId),
+    loadNeighbors(requestId),
+    loadPurposes(requestId),
+    loadPorts(requestId),
+  ]);
+  if (requestId === state.selectionRequestId) {
+    state.selectionLoading = false;
+    renderSelectedDeviceOverview();
+  }
   renderPortDetail(null);
   renderDiagnosticResult(null);
   setStatus(`API connected. ${state.devices.length} devices loaded.`, true);
 }
 
 async function selectDevice(deviceId) {
+  const requestId = ++state.selectionRequestId;
   state.selectedDevice =
     state.devices.find((device) => device.device_id === deviceId) ||
     state.dashboardDevices.find((row) => row.device.device_id === deviceId)?.device ||
@@ -334,6 +439,10 @@ async function selectDevice(deviceId) {
   state.selectedPort = null;
   state.previewReady = false;
   state.previewAction = "collect";
+  state.selectionLoading = true;
+  state.selectedDiagnostics = null;
+  state.latestPorts = [];
+  state.latestPortSummary = {};
   renderDevices();
   renderDashboard();
   renderDeviceFacts(state.selectedDevice);
@@ -341,10 +450,23 @@ async function selectDevice(deviceId) {
   renderPortDetail(null);
   renderCheckResults(null);
   updateCheckButton();
-  await loadDiagnostics();
-  await loadNeighbors();
-  await loadPurposes();
-  await loadPorts();
+  const results = await Promise.allSettled([
+    loadDiagnostics(requestId),
+    loadNeighbors(requestId),
+    loadPurposes(requestId),
+    loadPorts(requestId),
+  ]);
+  if (requestId !== state.selectionRequestId) {
+    return;
+  }
+  state.selectionLoading = false;
+  renderSelectedDeviceOverview();
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed) {
+    setStatus(`일부 장비 정보를 불러오지 못했습니다. ${failed.reason?.message || ""}`.trim(), false);
+  } else {
+    setStatus(`${state.selectedDevice.hostname || state.selectedDevice.device_id} 상태를 불러왔습니다.`, true);
+  }
   setCollectionResultText(collectionReadyMessage(state.selectedDevice));
   renderDiagnosticResult(null);
 }
@@ -354,10 +476,10 @@ function updateCheckButton() {
     return;
   }
   nodes.checkDevice.disabled = !isCollectable(state.selectedDevice);
-  nodes.checkDevice.textContent = "Preview CHECK";
+  nodes.checkDevice.textContent = "CHECK 미리보기";
 }
 
-async function loadPurposes() {
+async function loadPurposes(requestId = state.selectionRequestId) {
   if (!nodes.purposeSelect || !nodes.loadPlan || !nodes.collect) {
     return;
   }
@@ -371,7 +493,12 @@ async function loadPurposes() {
     return;
   }
 
-  const payload = await api(`/vendors/${encodeURIComponent(state.selectedDevice.vendor)}/purposes`);
+  const deviceId = state.selectedDevice.device_id;
+  const vendor = state.selectedDevice.vendor;
+  const payload = await api(`/vendors/${encodeURIComponent(vendor)}/purposes`);
+  if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId) {
+    return;
+  }
   for (const purpose of payload.purposes) {
     const option = document.createElement("option");
     option.value = purpose;
@@ -386,20 +513,25 @@ async function loadPurposes() {
   state.previewReady = false;
   state.previewAction = "collect";
   if (state.selectedPurpose) {
-    await loadCommandPlan();
+    await loadCommandPlan({ requestId, deviceId });
   }
 }
 
-async function loadCommandPlan() {
+async function loadCommandPlan({ requestId = state.selectionRequestId, deviceId = state.selectedDevice?.device_id } = {}) {
   if (!nodes.collect) {
     return;
   }
   if (!state.selectedDevice || !state.selectedPurpose) {
     return;
   }
-  state.latestPlan = await api(
-    `/devices/${encodeURIComponent(state.selectedDevice.device_id)}/command-plan/${encodeURIComponent(state.selectedPurpose)}`,
+  const purpose = state.selectedPurpose;
+  const plan = await api(
+    `/devices/${encodeURIComponent(deviceId)}/command-plan/${encodeURIComponent(purpose)}`,
   );
+  if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId || state.selectedPurpose !== purpose) {
+    return;
+  }
+  state.latestPlan = plan;
   renderCommandPlan(state.latestPlan);
   renderCommandPreview(state.latestPlan, { action: "collect" });
 }
@@ -738,7 +870,7 @@ async function loadPortDetail(deviceId, interfaceName) {
   renderPortDetail(payload.port);
 }
 
-async function loadPorts() {
+async function loadPorts(requestId = state.selectionRequestId) {
   if (!nodes.portMatrix && !nodes.portTableBody) {
     return;
   }
@@ -754,11 +886,15 @@ async function loadPorts() {
     renderPortEmptyState("No device selected.");
     return;
   }
+  const deviceId = state.selectedDevice.device_id;
   if (nodes.portMatrixMeta) {
     nodes.portMatrixMeta.textContent = `Loading ports for ${state.selectedDevice.device_id}...`;
   }
   try {
-    const payload = await api(`/devices/${encodeURIComponent(state.selectedDevice.device_id)}/ports/latest`);
+    const payload = await api(`/devices/${encodeURIComponent(deviceId)}/ports/latest`);
+    if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId) {
+      return;
+    }
     state.latestPorts = (Array.isArray(payload.ports) ? payload.ports : []).filter((port) =>
       looksLikePortInterface(port?.interface),
     );
@@ -770,6 +906,9 @@ async function loadPorts() {
     }
     renderPortMatrix();
   } catch (error) {
+    if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId) {
+      return;
+    }
     if (nodes.portMatrixMeta) {
       nodes.portMatrixMeta.textContent = error.message;
     }
@@ -817,6 +956,7 @@ function renderPortSummary() {
     item.append(valueNode, labelNode);
     nodes.portMatrixSummary.append(item);
   }
+  renderSelectedDeviceOverview();
 }
 
 function renderPortTiles() {
@@ -1399,7 +1539,9 @@ function createDeviceNode(row) {
   button.type = "button";
   button.className = `device-node ${status}`;
   button.dataset.nodeId = row.device.device_id;
+  button.dataset.deviceId = row.device.device_id;
   button.title = `${row.device.hostname || row.device.device_id} · ${dashboardStatusLabel(row)}`;
+  button.setAttribute("aria-pressed", state.selectedDevice?.device_id === row.device.device_id ? "true" : "false");
   button.addEventListener("click", () => openManagedDevice(row.device.device_id));
   if (state.selectedDevice?.device_id === row.device.device_id) {
     button.classList.add("selected");
@@ -2044,6 +2186,9 @@ function renderAlarmFeed() {
       });
     }
     for (const finding of row.findings) {
+      if (isSuppressedActionFeedFinding(finding)) {
+        continue;
+      }
       if (["warning", "critical"].includes(finding.severity)) {
         events.push({
           severity: finding.severity,
@@ -2111,6 +2256,10 @@ function renderAlarmFeed() {
     item.append(title, detail, badge);
     nodes.alarmFeed.append(item);
   }
+}
+
+function isSuppressedActionFeedFinding(finding) {
+  return ACTION_FEED_SUPPRESSED_FINDING_TITLES.has(String(finding?.title || ""));
 }
 
 function filteredDashboardRows() {
@@ -2654,7 +2803,7 @@ function renderSummary(message, className) {
   nodes.diagnosticSummary.textContent = message;
 }
 
-async function loadDiagnostics() {
+async function loadDiagnostics(requestId = state.selectionRequestId) {
   if (!nodes.diagnosticFindings) {
     return;
   }
@@ -2664,7 +2813,12 @@ async function loadDiagnostics() {
     return;
   }
 
-  const payload = await api(`/devices/${encodeURIComponent(state.selectedDevice.device_id)}/diagnostics`);
+  const deviceId = state.selectedDevice.device_id;
+  const payload = await api(`/devices/${encodeURIComponent(deviceId)}/diagnostics`);
+  if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId) {
+    return;
+  }
+  state.selectedDiagnostics = payload;
   const severity = highestSeverity(payload.findings);
   renderSummary(payload.summary, severityClass(severity));
   for (const finding of payload.findings) {
@@ -2686,9 +2840,10 @@ async function loadDiagnostics() {
     item.append(title, evidence, next);
     nodes.diagnosticFindings.append(item);
   }
+  renderSelectedDeviceOverview();
 }
 
-async function loadNeighbors() {
+async function loadNeighbors(requestId = state.selectionRequestId) {
   if (!nodes.neighborsBody || !nodes.neighborsNote) {
     return;
   }
@@ -2698,7 +2853,11 @@ async function loadNeighbors() {
     return;
   }
 
-  const payload = await api(`/devices/${encodeURIComponent(state.selectedDevice.device_id)}/neighbors`);
+  const deviceId = state.selectedDevice.device_id;
+  const payload = await api(`/devices/${encodeURIComponent(deviceId)}/neighbors`);
+  if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId) {
+    return;
+  }
   nodes.neighborsNote.textContent = payload.reference_note;
   if (!payload.neighbors.length) {
     const row = document.createElement("tr");
