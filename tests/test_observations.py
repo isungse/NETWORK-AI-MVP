@@ -7,6 +7,7 @@ from network_ai_mvp.inventory import get_device, load_devices
 from network_ai_mvp.observations import (
     find_latest_port,
     read_latest_observation,
+    read_latest_port_observation,
     read_observation_index,
     store_collection_observation,
 )
@@ -78,6 +79,43 @@ class ObservationStoreTests(unittest.TestCase):
 
             self.assertIsNone(read_latest_observation(temp_dir, "arista-2f-outpatient"))
             self.assertIsNone(find_latest_port(temp_dir, "arista-2f-outpatient", "Et6"))
+
+    def test_latest_port_observation_skips_newer_collection_without_ports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            device = get_device(load_devices("inventory/devices.csv"), "arista-2f-outpatient")
+            interface_result = CommandResult(
+                device_id=device.device_id,
+                hostname=device.hostname,
+                management_ip=device.management_ip,
+                purpose="interfaces",
+                commands=("show interfaces status", "show interfaces counters errors"),
+                stdout=SAMPLE_STDOUT,
+                stderr="",
+                returncode=0,
+            )
+            security_result = CommandResult(
+                device_id=device.device_id,
+                hostname=device.hostname,
+                management_ip=device.management_ip,
+                purpose="security-logs",
+                commands=("show logging", "show users"),
+                stdout="No security events",
+                stderr="",
+                returncode=0,
+            )
+
+            store_collection_observation(
+                temp_dir, device=device, result=interface_result, timestamp="2026-06-01T00:00:00Z"
+            )
+            store_collection_observation(
+                temp_dir, device=device, result=security_result, timestamp="2026-06-01T01:00:00Z"
+            )
+
+            self.assertEqual(read_latest_observation(temp_dir, device.device_id)["purpose"], "security-logs")
+            port_observation = read_latest_port_observation(temp_dir, device.device_id)
+            self.assertIsNotNone(port_observation)
+            self.assertEqual(port_observation["purpose"], "interfaces")
+            self.assertEqual(find_latest_port(temp_dir, device.device_id, "Et6")["interface"], "Et6")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,8 @@ except (ImportError, RuntimeError):  # pragma: no cover - depends on optional AP
 
 from network_ai_mvp.api import create_app
 from network_ai_mvp.executor import CommandResult
+from network_ai_mvp.inventory import get_device, load_devices
+from network_ai_mvp.observations import store_collection_observation
 
 
 class FakeExecutor:
@@ -361,6 +363,53 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(port.json()["port"]["speed_mbps"], 100)
         self.assertEqual(search.status_code, 200)
         self.assertEqual(search.json()["results"][0]["type"], "port")
+
+    def test_ports_latest_falls_back_when_newer_observation_has_no_ports(self) -> None:
+        interface_stdout = (
+            "===== show interfaces status =====\n"
+            "Port       Name   Status       Vlan     Duplex Speed  Type\n"
+            "Et6               connected    22       a-full a-100M 1000BASE-T\n"
+        )
+        device = self.client.get("/devices/arista-2f-outpatient").json()
+        inventory_device = get_device(load_devices("inventory/devices.csv"), device["device_id"])
+        store_collection_observation(
+            self.data_dir,
+            device=inventory_device,
+            result=CommandResult(
+                device_id=inventory_device.device_id,
+                hostname=inventory_device.hostname,
+                management_ip=inventory_device.management_ip,
+                purpose="interfaces",
+                commands=("show interfaces status",),
+                stdout=interface_stdout,
+                stderr="",
+                returncode=0,
+            ),
+            timestamp="2026-06-01T00:00:00Z",
+        )
+        store_collection_observation(
+            self.data_dir,
+            device=inventory_device,
+            result=CommandResult(
+                device_id=inventory_device.device_id,
+                hostname=inventory_device.hostname,
+                management_ip=inventory_device.management_ip,
+                purpose="security-logs",
+                commands=("show logging",),
+                stdout="No security events",
+                stderr="",
+                returncode=0,
+            ),
+            timestamp="2026-06-01T01:00:00Z",
+        )
+
+        response = self.client.get("/devices/arista-2f-outpatient/ports/latest")
+        payload = response.json()
+        self.assertTrue(payload["data_available"])
+        self.assertFalse(payload["is_latest_observation"])
+        self.assertEqual(payload["purpose"], "interfaces")
+        self.assertEqual(payload["latest_purpose"], "security-logs")
+        self.assertEqual(payload["ports"][0]["interface"], "Et6")
 
     def test_device_check_runs_only_allowlisted_purposes_and_returns_check_items(self) -> None:
         stdout = (

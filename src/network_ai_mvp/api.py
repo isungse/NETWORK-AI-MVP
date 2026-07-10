@@ -13,7 +13,7 @@ from .executor import PowerShellTelnetReadOnlyExecutor
 from .inventory import InventoryError, get_device, load_devices
 from .models import CommandPlan, Device
 from .neighbors import get_neighbors_for_device
-from .observations import find_latest_port, read_latest_observation
+from .observations import find_latest_port, read_latest_observation, read_latest_port_observation
 from .policy import CommandPolicyError, allowed_purposes, build_command_plan
 from .search import search_network_state
 from .services.collection import public_command_plan, public_device, public_job_snapshot
@@ -174,20 +174,53 @@ def create_app(
         except InventoryError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-        observation = read_latest_observation(data_dir, device.device_id)
+        latest_observation = read_latest_observation(data_dir, device.device_id)
+        observation = read_latest_port_observation(data_dir, device.device_id)
         if not observation:
+            latest_purpose = latest_observation.get("purpose") if latest_observation else None
+            latest_timestamp = latest_observation.get("timestamp") if latest_observation else None
+            message = (
+                f"Latest {latest_purpose} observation contains no parsed port status. "
+                "Run a read-only interfaces or CHECK collection."
+                if latest_observation
+                else "No stored parsed port observation yet. Run a read-only interfaces collection first."
+            )
             return {
                 "device": public_device(device, DEFAULT_COLLECTOR_REGISTRY),
                 "data_available": False,
-                "message": "No stored parsed observation yet. Run a read-only collection first.",
+                "message": message,
+                "latest_timestamp": latest_timestamp,
+                "latest_purpose": latest_purpose,
                 "summary": {},
                 "ports": [],
             }
+        observation_identity = observation.get("run_id") or (
+            observation.get("timestamp"),
+            observation.get("purpose"),
+        )
+        latest_identity = (
+            latest_observation.get("run_id")
+            or (latest_observation.get("timestamp"), latest_observation.get("purpose"))
+            if latest_observation
+            else None
+        )
+        is_latest_observation = bool(latest_observation and observation_identity == latest_identity)
         return {
             "device": public_device(device, DEFAULT_COLLECTOR_REGISTRY),
             "data_available": True,
             "timestamp": observation.get("timestamp"),
             "purpose": observation.get("purpose"),
+            "is_latest_observation": is_latest_observation,
+            "latest_timestamp": latest_observation.get("timestamp") if latest_observation else None,
+            "latest_purpose": latest_observation.get("purpose") if latest_observation else None,
+            "message": (
+                None
+                if is_latest_observation
+                else (
+                    f"Latest {latest_observation.get('purpose')} observation contains no port data. "
+                    f"Showing the last port snapshot from {observation.get('timestamp')}."
+                )
+            ),
             "summary": observation.get("summary", {}),
             "ports": observation.get("ports", []),
         }

@@ -45,6 +45,7 @@ const nodes = {
   alarmFeed: document.querySelector("#alarmFeed"),
   dashboardShowAll: document.querySelector("#dashboardShowAll"),
   dashboardShowIssues: document.querySelector("#dashboardShowIssues"),
+  deviceAlertSummary: document.querySelector("#deviceAlertSummary"),
   selectedDeviceOverview: document.querySelector("#selectedDeviceOverview"),
   selectedDeviceTitle: document.querySelector("#selectedDeviceTitle"),
   selectedDeviceSubtitle: document.querySelector("#selectedDeviceSubtitle"),
@@ -304,6 +305,80 @@ function selectedDashboardRow() {
   return state.dashboardDevices.find((item) => item.device.device_id === state.selectedDevice?.device_id) || null;
 }
 
+function selectedFindings() {
+  const combined = [
+    ...(Array.isArray(state.selectedDiagnostics?.findings) ? state.selectedDiagnostics.findings : []),
+    ...(Array.isArray(selectedDashboardRow()?.findings) ? selectedDashboardRow().findings : []),
+  ];
+  const unique = new Map();
+  for (const finding of combined) {
+    const key = [finding?.severity, finding?.interface, finding?.title].join("|");
+    if (!unique.has(key)) {
+      unique.set(key, finding);
+    }
+  }
+  return Array.from(unique.values());
+}
+
+function criticalPortLabel(interfaceName) {
+  const value = String(interfaceName || "");
+  const match = value.match(/(\d+(?:\/\d+)*)$/);
+  return match ? `${match[1]}번 포트` : value;
+}
+
+function renderDeviceAlertSummary() {
+  if (!nodes.deviceAlertSummary) {
+    return;
+  }
+  const findings = selectedFindings()
+    .filter((finding) => finding?.interface && ["critical", "down"].includes(normalizeSeverity(finding.severity)))
+    .sort((left, right) => String(left.interface).localeCompare(String(right.interface), undefined, { numeric: true }));
+  nodes.deviceAlertSummary.replaceChildren();
+
+  const header = document.createElement("div");
+  header.className = "device-alert-summary-head";
+  const heading = document.createElement("h3");
+  heading.textContent = "크리티컬 포트";
+  header.append(heading, severityBadge(findings.length ? "critical" : "normal", `${findings.length}개`));
+  nodes.deviceAlertSummary.append(header);
+
+  if (!findings.length) {
+    const empty = document.createElement("p");
+    empty.className = "device-alert-empty";
+    empty.textContent = "현재 진단 finding에 크리티컬 포트가 없습니다.";
+    nodes.deviceAlertSummary.append(empty);
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "device-alert-list";
+  for (const finding of findings) {
+    const item = document.createElement("article");
+    item.className = "device-alert-item";
+    const title = document.createElement("div");
+    title.className = "device-alert-title";
+    const port = document.createElement("strong");
+    port.textContent = criticalPortLabel(finding.interface);
+    const interfaceName = document.createElement("code");
+    interfaceName.textContent = finding.interface;
+    const source = document.createElement("span");
+    const historical = String(finding.evidence || "").toLowerCase().includes("historical reference");
+    source.className = `finding-source ${historical ? "historical" : "observed"}`;
+    source.textContent = historical ? "과거 기록" : "관측 finding";
+    title.append(port, interfaceName, source);
+
+    const findingTitle = document.createElement("p");
+    findingTitle.className = "device-alert-finding";
+    findingTitle.textContent = finding.title;
+    const evidence = document.createElement("p");
+    evidence.className = "device-alert-evidence";
+    evidence.textContent = finding.evidence;
+    item.append(title, findingTitle, evidence);
+    list.append(item);
+  }
+  nodes.deviceAlertSummary.append(list);
+}
+
 function formatObservedAt(value) {
   if (!value) {
     return "수집 데이터 없음";
@@ -321,6 +396,7 @@ function formatObservedAt(value) {
 }
 
 function renderSelectedDeviceOverview() {
+  renderDeviceAlertSummary();
   if (!nodes.selectedDeviceOverview) {
     return;
   }
@@ -900,9 +976,14 @@ async function loadPorts(requestId = state.selectionRequestId) {
     );
     state.latestPortSummary = payload.summary || {};
     if (nodes.portMatrixMeta) {
-      nodes.portMatrixMeta.textContent = payload.data_available
-        ? `${state.selectedDevice.hostname} (${state.selectedDevice.management_ip}) - ${text(payload.timestamp)}`
-        : payload.message || "No stored parsed observation yet.";
+      if (payload.data_available) {
+        const baseMeta = `${state.selectedDevice.hostname} (${state.selectedDevice.management_ip}) · ${text(payload.timestamp)} · ${text(payload.purpose)}`;
+        nodes.portMatrixMeta.textContent = payload.is_latest_observation === false
+          ? `${baseMeta} · 최근 포트 관측 (최신 ${text(payload.latest_purpose)} 수집에는 포트 데이터 없음)`
+          : baseMeta;
+      } else {
+        nodes.portMatrixMeta.textContent = payload.message || "No stored parsed port observation yet.";
+      }
     }
     renderPortMatrix();
   } catch (error) {

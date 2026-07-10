@@ -115,6 +115,40 @@ def read_latest_observation(base_dir: str | Path, device_id: str) -> dict[str, A
     return payload if isinstance(payload, dict) else None
 
 
+def read_latest_port_observation(base_dir: str | Path, device_id: str) -> dict[str, Any] | None:
+    """Return the newest stored observation that actually contains parsed ports.
+
+    Non-interface collections such as security logs legitimately contain no ports and
+    must not hide the most recent usable interface/check snapshot in the port UI.
+    """
+    root = _safe_root(base_dir)
+    observation_dir = root / "observations" / _safe_name(device_id)
+    latest = read_latest_observation(root, device_id)
+    if latest and isinstance(latest.get("ports"), list) and latest["ports"]:
+        return latest
+    if not observation_dir.exists():
+        return None
+
+    history_paths = sorted(
+        (
+            path
+            for path in observation_dir.glob("*.json")
+            if path.name not in {"latest.json", "index.json"}
+        ),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    for path in history_paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            LOGGER.warning("Ignoring unreadable observation history %s: %s", path, exc)
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("ports"), list) and payload["ports"]:
+            return payload
+    return None
+
+
 def read_observation_index(base_dir: str | Path, device_id: str) -> list[dict[str, Any]]:
     root = _safe_root(base_dir)
     path = root / "observations" / _safe_name(device_id) / "index.json"
@@ -131,7 +165,7 @@ def read_observation_index(base_dir: str | Path, device_id: str) -> list[dict[st
 
 
 def latest_ports(base_dir: str | Path, device_id: str) -> list[dict[str, Any]]:
-    observation = read_latest_observation(base_dir, device_id)
+    observation = read_latest_port_observation(base_dir, device_id)
     if not observation:
         return []
     return list(observation.get("ports") or [])
