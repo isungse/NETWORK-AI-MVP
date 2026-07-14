@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from network_ai_mvp.inventory import get_device, load_devices
+from network_ai_mvp.inventory import InventoryRepository, get_device, load_devices
 
 
 class InventoryTests(unittest.TestCase):
@@ -21,6 +21,16 @@ class InventoryTests(unittest.TestCase):
 
         self.assertEqual(device.hostname, "9F_BB_ARI_17.2")
         self.assertEqual(device.management_ip, "172.17.17.2")
+
+    def test_repository_provides_consistent_list_and_lookup_access(self) -> None:
+        path = Path(__file__).resolve().parents[1] / "inventory" / "devices.csv"
+        repository = InventoryRepository(path)
+
+        devices = repository.list_devices()
+        device = repository.get_device("arista-10g-core")
+
+        self.assertIn(device, devices)
+        self.assertEqual(repository.path, path)
 
     def test_backbone_cisco_neighbors_are_telnet_read_only_targets(self) -> None:
         path = Path(__file__).resolve().parents[1] / "inventory" / "devices.csv"

@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from .inventory import get_device, load_devices
+from .inventory import InventoryRepository
 from .policy import allowed_purposes, build_command_plan, validate_commands
 
 DEFAULT_INVENTORY = Path(__file__).resolve().parents[2] / "inventory" / "devices.csv"
@@ -30,15 +30,14 @@ def main() -> None:
     check_parser.add_argument("--command", required=True)
 
     args = parser.parse_args()
+    inventory = InventoryRepository(args.inventory)
 
     if args.command == "list-devices":
-        devices = load_devices(args.inventory)
-        _print_json([asdict(device) for device in devices])
+        _print_json([asdict(device) for device in inventory.list_devices()])
     elif args.command == "list-purposes":
         _print_json({"vendor": args.vendor, "purposes": allowed_purposes(args.vendor)})
     elif args.command == "plan-commands":
-        devices = load_devices(args.inventory)
-        device = get_device(devices, args.device_id)
+        device = inventory.get_device(args.device_id)
         plan = build_command_plan(device, args.purpose)
         _print_json(asdict(plan))
     elif args.command == "check-command":

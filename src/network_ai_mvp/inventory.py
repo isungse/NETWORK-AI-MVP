@@ -21,6 +21,23 @@ class InventoryError(ValueError):
     pass
 
 
+class InventoryRepository:
+    """File-backed device inventory access.
+
+    The repository intentionally reloads the CSV for every operation so local
+    inventory edits are visible without restarting the API or collector.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def list_devices(self) -> list[Device]:
+        return load_devices(self.path)
+
+    def get_device(self, device_id: str) -> Device:
+        return get_device(self.list_devices(), device_id)
+
+
 def load_devices(path: str | Path) -> list[Device]:
     inventory_path = Path(path)
     with inventory_path.open(newline="", encoding="utf-8") as file_obj:

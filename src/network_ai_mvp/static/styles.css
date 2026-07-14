@@ -2132,6 +2132,443 @@ tr.device-row.selected {
   }
 }
 
+/* Switch faceplate: preserve logical port position while keeping observation state explicit. */
+.operations-page .port-matrix-panel {
+  --switch-chassis-bg: #55555a;
+  --switch-chassis-border: #77777c;
+  --switch-port-bg: #0b0b0c;
+  --switch-port-border: #9a9a9d;
+  --switch-port-text: #d8d8d8;
+  --port-status-unconnected: #f0f0f0;
+  --port-status-connected: #98df70;
+  --port-status-admin-disabled: #8e6868;
+  --port-status-fault: #d25b49;
+  --port-status-unknown: #8b8d91;
+  --port-selection: #5869d8;
+}
+
+.operations-page .port-matrix {
+  display: block;
+  padding: 16px 16px 8px;
+}
+
+.switch-chassis-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: 0 0 6px;
+  scrollbar-gutter: stable;
+}
+
+.switch-chassis-scroll:focus-visible {
+  outline: 2px solid rgba(37, 99, 167, 0.35);
+  outline-offset: 2px;
+}
+
+.switch-chassis {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  width: max-content;
+  min-width: 100%;
+  min-height: 112px;
+  border: 1px solid var(--switch-chassis-border);
+  border-radius: 2px;
+  background: var(--switch-chassis-bg);
+  color: #ffffff;
+  padding: 12px 14px;
+}
+
+.switch-port-area,
+.switch-port-banks {
+  display: flex;
+  align-items: flex-start;
+}
+
+.switch-port-area {
+  gap: 18px;
+}
+
+.switch-port-group {
+  display: grid;
+  gap: 5px;
+}
+
+.switch-port-banks {
+  gap: 14px;
+}
+
+.switch-port-bank {
+  display: grid;
+  gap: 3px;
+  align-items: start;
+  padding-right: 14px;
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.switch-port-bank:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+
+.switch-port-bank.single-row {
+  padding-top: 14px;
+}
+
+.switch-port-row {
+  display: grid;
+  grid-template-columns: repeat(var(--bank-columns), 30px);
+  gap: 3px;
+  min-height: 26px;
+}
+
+.switch-port {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  width: 30px;
+  min-width: 30px;
+  height: 26px;
+  min-height: 26px;
+  overflow: visible;
+  border: 1px solid var(--switch-port-border);
+  border-radius: 1px;
+  background: var(--switch-port-bg);
+  box-shadow: inset 0 0 0 1px #3d3d40;
+  color: var(--switch-port-text);
+  padding: 3px 3px 2px;
+  text-align: left;
+}
+
+.switch-port::before {
+  position: absolute;
+  top: 3px;
+  left: 6px;
+  width: 16px;
+  height: 7px;
+  border: 1px solid #5d5d60;
+  border-bottom-color: #2e2e30;
+  background: #111113;
+  content: "";
+}
+
+.switch-port:hover:not(:disabled) {
+  border-color: #d8d8da;
+  background: #161618;
+  color: var(--switch-port-text);
+}
+
+.switch-port:focus-visible,
+.switch-port.is-selected {
+  z-index: 2;
+  border-color: var(--port-selection);
+  outline: 2px solid var(--port-selection);
+  outline-offset: 1px;
+}
+
+.switch-port.is-filtered-out {
+  opacity: 0.22;
+}
+
+.switch-port.is-filter-match {
+  border-color: #e3e6ea;
+}
+
+.switch-port-number,
+.switch-port-status-code {
+  position: relative;
+  z-index: 1;
+  color: var(--port-indicator-color, var(--port-status-unknown));
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.switch-port-number {
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.switch-port-status-code {
+  font-size: 6px;
+  font-weight: 900;
+}
+
+.switch-port.port-state-connected,
+.port-legend-marker.port-state-connected {
+  --port-indicator-color: var(--port-status-connected);
+}
+
+.switch-port.port-state-unconnected,
+.port-legend-marker.port-state-unconnected {
+  --port-indicator-color: var(--port-status-unconnected);
+}
+
+.switch-port.port-state-admin-disabled,
+.port-legend-marker.port-state-admin-disabled {
+  --port-indicator-color: var(--port-status-admin-disabled);
+}
+
+.switch-port.port-state-fault,
+.port-legend-marker.port-state-fault {
+  --port-indicator-color: var(--port-status-fault);
+}
+
+.switch-port.port-state-unknown,
+.port-legend-marker.port-state-unknown {
+  --port-indicator-color: var(--port-status-unknown);
+}
+
+.switch-port-warning {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #ffffff;
+  border-radius: 50%;
+  background: var(--port-status-fault);
+  color: #ffffff;
+  font-size: 7px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.switch-port.has-diagnostic-warning {
+  border-top-color: var(--port-status-fault);
+}
+
+.switch-bank-label,
+.switch-group-label {
+  overflow: hidden;
+  color: #e2e2e4;
+  font-size: 8px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switch-bank-label {
+  max-width: 194px;
+  text-align: center;
+}
+
+.switch-group-label {
+  max-width: 460px;
+  color: #f0f0f1;
+  font-size: 9px;
+}
+
+.switch-identity {
+  display: grid;
+  align-self: stretch;
+  align-content: center;
+  width: 150px;
+  min-width: 150px;
+  margin-left: auto;
+  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  padding-left: 14px;
+  text-align: right;
+}
+
+.switch-identity strong,
+.switch-identity span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switch-identity strong {
+  font-size: 10px;
+}
+
+.switch-identity span {
+  color: #d0d0d2;
+  font-size: 8px;
+}
+
+.switch-no-physical-ports {
+  align-self: center;
+  color: #efeff0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.switch-layout-note {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.auxiliary-interfaces {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.auxiliary-interfaces h3 {
+  margin: 0;
+  color: var(--secondary);
+  font-size: 11px;
+}
+
+.auxiliary-interface-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.auxiliary-interface {
+  min-height: 26px;
+  border-color: var(--line);
+  border-radius: 3px;
+  background: #ffffff;
+  color: var(--secondary);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  padding: 3px 7px;
+}
+
+.auxiliary-interface:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #f8fafc;
+  color: var(--ink);
+}
+
+.auxiliary-interface.is-selected {
+  outline: 2px solid var(--port-selection);
+  outline-offset: 1px;
+}
+
+.auxiliary-interface.is-filtered-out {
+  opacity: 0.28;
+}
+
+.port-summary-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 16px;
+  border-top: 1px solid var(--subtle);
+  padding: 8px 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.port-summary-item strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.port-refresh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 16px;
+}
+
+.port-refresh-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.port-refresh-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-left: auto;
+  color: var(--secondary);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.port-refresh-controls select {
+  min-width: 118px;
+  min-height: 30px;
+}
+
+.port-refresh-controls button {
+  min-height: 30px;
+}
+
+.port-matrix-divider {
+  height: 1px;
+  margin: 0 16px;
+  background: var(--line);
+}
+
+.port-status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  min-height: 34px;
+  align-items: center;
+  padding: 8px 16px;
+  color: var(--secondary);
+  font-size: 10px;
+}
+
+.port-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.port-legend-marker {
+  width: 10px;
+  height: 10px;
+  border: 1px solid #55565a;
+  background: var(--port-indicator-color, var(--port-status-unknown));
+}
+
+.port-legend-marker.legend-selection {
+  border: 2px solid var(--port-selection);
+  background: transparent;
+}
+
+.port-legend-marker.legend-warning {
+  border: 1px solid #ffffff;
+  border-radius: 50%;
+  background: var(--port-status-fault);
+  box-shadow: 0 0 0 1px var(--port-status-fault);
+}
+
+.operations-page .port-matrix-panel .filter-bar {
+  border-top: 1px solid var(--subtle);
+}
+
+@media (max-width: 640px) {
+  .operations-page .port-matrix {
+    display: block;
+    padding-inline: 12px;
+  }
+
+  .switch-chassis {
+    min-width: max-content;
+  }
+
+  .port-refresh-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .port-refresh-controls {
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
+  .port-refresh-controls select {
+    min-width: 0;
+    width: auto;
+  }
+}
+
 /* 2026 operations console refinement: keep the selected switch and its health in context. */
 .operations-page {
   min-width: 0;

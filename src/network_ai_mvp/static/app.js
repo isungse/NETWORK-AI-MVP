@@ -18,10 +18,16 @@ const state = {
   selectedPort: null,
   latestPorts: [],
   latestPortSummary: {},
+  latestPortPayload: null,
   portStatusFilter: "all",
   portModeFilter: "all",
   portVlanFilter: "",
   portSearchQuery: "",
+  portRefreshPeriod: 30000,
+  portRefreshTimer: null,
+  portRefreshController: null,
+  portRefreshPromise: null,
+  portRefreshDeviceId: "",
   previewReady: false,
   previewAction: "collect",
   latestResult: null,
@@ -78,6 +84,8 @@ const nodes = {
   portMatrix: document.querySelector("#portMatrix"),
   portTableBody: document.querySelector("#portTableBody"),
   portRefresh: document.querySelector("#portRefresh"),
+  portRefreshPeriod: document.querySelector("#portRefreshPeriod"),
+  portStatusLegend: document.querySelector("#portStatusLegend"),
   portStatusFilter: document.querySelector("#portStatusFilter"),
   portModeFilter: document.querySelector("#portModeFilter"),
   portVlanFilter: document.querySelector("#portVlanFilter"),
@@ -177,6 +185,18 @@ function text(value) {
   return value === null || value === undefined || value === "" ? "-" : String(value);
 }
 
+function appendFacts(container, rows) {
+  const fragment = document.createDocumentFragment();
+  for (const [label, value] of rows) {
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = text(value);
+    fragment.append(term, description);
+  }
+  container.append(fragment);
+}
+
 function isCollectable(device) {
   return Boolean(device?.collectable);
 }
@@ -244,6 +264,27 @@ function portSeverity(port) {
     return "unknown";
   }
   return "normal";
+}
+
+function normalizePortOperationalStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (status === "connected" || status === "up") {
+    return "connected";
+  }
+  if (status === "notconnect" || status === "down") {
+    return "unconnected";
+  }
+  if (status === "disabled" || status === "administratively down" || status === "admin-down") {
+    return "admin-disabled";
+  }
+  if (status === "errdisabled") {
+    return "fault";
+  }
+  return "unknown";
+}
+
+function portHealthSeverity(port) {
+  return hasPortErrors(port) ? "warning" : "normal";
 }
 
 function hasPortErrors(port) {
@@ -469,17 +510,12 @@ function renderDeviceFacts(device) {
     ["Notes", device.notes],
   ];
 
-  for (const [label, value] of facts) {
-    const dt = document.createElement("dt");
-    dt.textContent = label;
-    const dd = document.createElement("dd");
-    dd.textContent = text(value);
-    nodes.deviceFacts.append(dt, dd);
-  }
+  appendFacts(nodes.deviceFacts, facts);
   renderSelectedDeviceOverview();
 }
 
 async function loadDevices() {
+  resetPortRefreshForSelection();
   setStatus("Loading inventory...", true);
   state.devices = await api("/devices");
   if (!state.selectedDevice && state.devices.length && page !== "dashboard") {
@@ -512,6 +548,7 @@ async function loadDevices() {
 }
 
 async function selectDevice(deviceId) {
+  resetPortRefreshForSelection();
   const requestId = ++state.selectionRequestId;
   state.selectedDevice =
     state.devices.find((device) => device.device_id === deviceId) ||
@@ -525,6 +562,7 @@ async function selectDevice(deviceId) {
   state.selectedDiagnostics = null;
   state.latestPorts = [];
   state.latestPortSummary = {};
+  state.latestPortPayload = null;
   renderDevices();
   renderDashboard();
   renderDeviceFacts(state.selectedDevice);
@@ -724,13 +762,7 @@ function renderCommandPreview(plan, { action = "collect", port = state.selectedP
     ["Estimated Time", action === "check" ? "30-90 seconds" : "10-45 seconds"],
     ["Audit Logging", "Enabled after execution"],
   ];
-  for (const [label, value] of rows) {
-    const dt = document.createElement("dt");
-    dt.textContent = label;
-    const dd = document.createElement("dd");
-    dd.textContent = text(value);
-    facts.append(dt, dd);
-  }
+  appendFacts(facts, rows);
 
   const notice = document.createElement("p");
   notice.className = "safety-notice";
@@ -834,7 +866,7 @@ async function checkSelectedDevice() {
     await loadAudit();
     await loadDashboard();
     await loadDiagnostics();
-    await loadPorts();
+    await loadPorts(state.selectionRequestId, { trigger: "collection" });
   }
 }
 
@@ -992,60 +1024,167 @@ async function loadPortDetail(deviceId, interfaceName) {
   renderPortDetail(payload.port);
 }
 
-async function loadPorts(requestId = state.selectionRequestId) {
-  if (!nodes.portMatrix && !nodes.portTableBody) {
+function clearPortRefreshTimer() {
+  if (state.portRefreshTimer) {
+    window.clearTimeout(state.portRefreshTimer);
+    state.portRefreshTimer = null;
+  }
+}
+
+function cancelPortRefreshRequest() {
+  state.portRefreshController?.abort();
+  state.portRefreshController = null;
+  state.portRefreshPromise = null;
+  state.portRefreshDeviceId = "";
+}
+
+function resetPortRefreshForSelection() {
+  clearPortRefreshTimer();
+  cancelPortRefreshRequest();
+}
+
+function setPortRefreshBusy(busy) {
+  nodes.portMatrix?.setAttribute("aria-busy", busy ? "true" : "false");
+  if (nodes.portRefresh) {
+    nodes.portRefresh.disabled = busy || !state.selectedDevice;
+    nodes.portRefresh.textContent = busy ? "Refreshing…" : "Refresh";
+  }
+  if (nodes.portRefreshPeriod) {
+    nodes.portRefreshPeriod.disabled = busy || !state.selectedDevice;
+  }
+}
+
+function schedulePortRefresh() {
+  clearPortRefreshTimer();
+  if (
+    !nodes.portRefreshPeriod ||
+    !state.selectedDevice ||
+    !state.portRefreshPeriod ||
+    document.hidden
+  ) {
     return;
   }
-  state.latestPorts = [];
-  state.latestPortSummary = {};
-  nodes.portMatrix?.replaceChildren();
-  nodes.portTableBody?.replaceChildren();
-  nodes.portMatrixSummary?.replaceChildren();
+  const deviceId = state.selectedDevice.device_id;
+  state.portRefreshTimer = window.setTimeout(() => {
+    state.portRefreshTimer = null;
+    if (state.selectedDevice?.device_id !== deviceId || document.hidden) {
+      schedulePortRefresh();
+      return;
+    }
+    loadPorts(state.selectionRequestId, { trigger: "automatic" }).catch((error) => {
+      if (error?.name !== "AbortError") {
+        setStatus(error.message, false);
+      }
+    });
+  }, state.portRefreshPeriod);
+}
+
+function portAutoRefreshEnabled() {
+  return Boolean(state.selectedDevice && state.portRefreshPeriod > 0);
+}
+
+function loadPorts(requestId = state.selectionRequestId, { trigger = "load" } = {}) {
+  if (!nodes.portMatrix && !nodes.portTableBody) {
+    return Promise.resolve();
+  }
   if (!state.selectedDevice) {
+    resetPortRefreshForSelection();
+    state.latestPorts = [];
+    state.latestPortSummary = {};
+    state.latestPortPayload = null;
+    nodes.portTableBody?.replaceChildren();
+    nodes.portMatrixSummary?.replaceChildren();
+    nodes.portStatusLegend?.replaceChildren();
     if (nodes.portMatrixMeta) {
       nodes.portMatrixMeta.textContent = "Select a device to load latest parsed port state.";
     }
     renderPortEmptyState("No device selected.");
-    return;
+    setPortRefreshBusy(false);
+    return Promise.resolve();
   }
   const deviceId = state.selectedDevice.device_id;
+  if (state.portRefreshPromise && state.portRefreshDeviceId === deviceId && trigger !== "collection") {
+    return state.portRefreshPromise;
+  }
+  cancelPortRefreshRequest();
+  const controller = new AbortController();
+  state.portRefreshController = controller;
+  state.portRefreshDeviceId = deviceId;
+  const promise = performPortLoad({ requestId, deviceId, trigger, controller });
+  state.portRefreshPromise = promise;
+  return promise;
+}
+
+async function performPortLoad({ requestId, deviceId, trigger, controller }) {
+  setPortRefreshBusy(true);
   if (nodes.portMatrixMeta) {
-    nodes.portMatrixMeta.textContent = `Loading ports for ${state.selectedDevice.device_id}...`;
+    nodes.portMatrixMeta.textContent = `${trigger === "automatic" ? "Auto-refreshing" : "Loading"} stored ports for ${deviceId}…`;
   }
   try {
-    const payload = await api(`/devices/${encodeURIComponent(deviceId)}/ports/latest`);
+    const payload = await api(`/devices/${encodeURIComponent(deviceId)}/ports/latest`, { signal: controller.signal });
     if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId) {
       return;
     }
-    state.latestPorts = (Array.isArray(payload.ports) ? payload.ports : []).filter((port) =>
-      looksLikePortInterface(port?.interface),
-    );
+    state.latestPorts = (Array.isArray(payload.ports) ? payload.ports : []).filter((port) => port?.interface);
     state.latestPortSummary = payload.summary || {};
-    if (nodes.portMatrixMeta) {
-      if (payload.data_available) {
-        const baseMeta = `${state.selectedDevice.hostname} (${state.selectedDevice.management_ip}) · ${text(payload.timestamp)} · ${text(payload.purpose)}`;
-        nodes.portMatrixMeta.textContent = payload.is_latest_observation === false
-          ? `${baseMeta} · 최근 포트 관측 (최신 ${text(payload.latest_purpose)} 수집에는 포트 데이터 없음)`
-          : baseMeta;
-      } else {
-        nodes.portMatrixMeta.textContent = payload.message || "No stored parsed port observation yet.";
-      }
-    }
+    state.latestPortPayload = payload;
+    renderPortMetadata(payload);
     renderPortMatrix();
   } catch (error) {
+    if (error?.name === "AbortError") {
+      return;
+    }
     if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId) {
       return;
     }
-    if (nodes.portMatrixMeta) {
-      nodes.portMatrixMeta.textContent = error.message;
+    renderPortMetadata(state.latestPortPayload, { error: error.message });
+    if (!state.latestPorts.length) {
+      renderPortEmptyState("Port state could not be loaded.");
     }
-    renderPortEmptyState("Port state could not be loaded.");
+    setStatus(`Stored port refresh failed: ${error.message}`, false);
+  } finally {
+    if (state.portRefreshController === controller) {
+      state.portRefreshController = null;
+      state.portRefreshPromise = null;
+      state.portRefreshDeviceId = "";
+      setPortRefreshBusy(false);
+      schedulePortRefresh();
+    }
   }
+}
+
+function renderPortMetadata(payload, { error = "" } = {}) {
+  if (!nodes.portMatrixMeta) {
+    return;
+  }
+  if (!payload) {
+    nodes.portMatrixMeta.textContent = error || "No stored parsed port observation yet.";
+    return;
+  }
+  const parts = [];
+  if (payload.data_available) {
+    parts.push(`Observed ${text(payload.timestamp)}`, `Purpose ${text(payload.purpose)}`);
+    parts.push(payload.is_latest_observation === false ? "Previous port snapshot" : "Latest stored snapshot");
+  }
+  if (payload.latest_timestamp) {
+    parts.push(`Latest collection ${text(payload.latest_timestamp)} (${text(payload.latest_purpose)})`);
+  }
+  if (payload.message) {
+    parts.push(payload.message);
+  }
+  if (!payload.data_available && !payload.message) {
+    parts.push("No stored parsed port observation yet.");
+  }
+  if (error) {
+    parts.push(`Refresh failed: ${error}. Last successful panel retained.`);
+  }
+  nodes.portMatrixMeta.textContent = parts.join(" · ");
 }
 
 function renderPortMatrix() {
   renderPortSummary();
-  renderPortTiles();
+  renderSwitchFrontPanel();
+  renderPortStatusLegend();
   renderPortTable();
 }
 
@@ -1053,80 +1192,382 @@ function renderPortSummary() {
   if (!nodes.portMatrixSummary) {
     return;
   }
-  const ports = state.latestPorts;
-  const counts = {
-    total: ports.length,
-    up: ports.filter((port) => portSeverity(port) === "normal").length,
-    down: ports.filter((port) => portSeverity(port) === "down").length,
-    error: ports.filter((port) => portSeverity(port) === "critical").length,
-    disabled: ports.filter((port) => portSeverity(port) === "maintenance").length,
-    trunk: ports.filter((port) => portMode(port) === "trunk").length,
-    access: ports.filter((port) => portMode(port) === "access").length,
-  };
+  const counts = summarizePhysicalPorts(state.latestPorts);
   const metrics = [
-    ["Total Ports", counts.total, "info"],
-    ["Up", counts.up, "normal"],
-    ["Down", counts.down, "down"],
-    ["Error", counts.error, "critical"],
-    ["Disabled", counts.disabled, "maintenance"],
-    ["Trunk", counts.trunk, "info"],
-    ["Access", counts.access, "normal"],
+    ["Physical", counts.total],
+    ["Connected", counts.up],
+    ["Unconnected", counts.down],
+    ["Admin disabled", counts.disabled],
+    ["Fault / warning", counts.error],
+    ["Trunk", counts.trunk],
+    ["Other interfaces", counts.logical],
   ];
   nodes.portMatrixSummary.replaceChildren();
-  for (const [label, value, severity] of metrics) {
-    const item = document.createElement("div");
-    item.className = `metric-card metric-${normalizeSeverity(severity)}`;
+  for (const [label, value] of metrics) {
+    const item = document.createElement("span");
+    item.className = "port-summary-item";
     const valueNode = document.createElement("strong");
     valueNode.textContent = value;
     const labelNode = document.createElement("span");
     labelNode.textContent = label;
-    item.append(valueNode, labelNode);
+    item.append(labelNode, document.createTextNode(" "), valueNode);
     nodes.portMatrixSummary.append(item);
   }
   renderSelectedDeviceOverview();
 }
 
-function renderPortTiles() {
+function summarizePhysicalPorts(ports) {
+  const physicalPorts = ports.filter((port) => parsePhysicalInterface(port.interface));
+  return {
+    total: physicalPorts.length,
+    up: physicalPorts.filter((port) => normalizePortOperationalStatus(port.status) === "connected").length,
+    down: physicalPorts.filter((port) => normalizePortOperationalStatus(port.status) === "unconnected").length,
+    error: physicalPorts.filter(
+      (port) => hasPortErrors(port) || normalizePortOperationalStatus(port.status) === "fault",
+    ).length,
+    disabled: physicalPorts.filter(
+      (port) => normalizePortOperationalStatus(port.status) === "admin-disabled",
+    ).length,
+    trunk: physicalPorts.filter((port) => portMode(port) === "trunk").length,
+    logical: ports.length - physicalPorts.length,
+  };
+}
+
+function renderSwitchFrontPanel() {
   if (!nodes.portMatrix) {
     return;
   }
   nodes.portMatrix.replaceChildren();
-  const ports = filteredPorts();
   if (!state.latestPorts.length) {
     renderPortEmptyState("No parsed ports found. Run a read-only interface collection first.");
     return;
   }
-  if (!ports.length) {
-    renderPortEmptyState("No ports match the current filters.");
+  const layout = buildPhysicalPortGroups(state.latestPorts);
+  const scroll = document.createElement("div");
+  scroll.className = "switch-chassis-scroll";
+  scroll.tabIndex = 0;
+  scroll.setAttribute("aria-label", "Switch front panel; scroll horizontally to inspect all ports");
+  const chassis = document.createElement("section");
+  chassis.className = "switch-chassis";
+  chassis.setAttribute("aria-label", `${state.selectedDevice?.hostname || state.selectedDevice?.device_id || "Switch"} logical front panel`);
+  const portArea = document.createElement("div");
+  portArea.className = "switch-port-area";
+
+  for (const group of layout.groups) {
+    portArea.append(renderPhysicalPortGroup(group));
+  }
+  if (!layout.groups.length) {
+    const notice = document.createElement("span");
+    notice.className = "switch-no-physical-ports";
+    notice.textContent = "No confirmed physical port candidates in this observation.";
+    portArea.append(notice);
+  }
+  const identity = document.createElement("div");
+  identity.className = "switch-identity";
+  const hostname = document.createElement("strong");
+  hostname.textContent = state.selectedDevice?.hostname || state.selectedDevice?.device_id || "Switch";
+  hostname.title = hostname.textContent;
+  const platform = document.createElement("span");
+  platform.textContent = [state.selectedDevice?.vendor, state.selectedDevice?.platform].filter(Boolean).join(" · ");
+  identity.append(hostname, platform);
+  chassis.append(portArea, identity);
+  scroll.append(chassis);
+  nodes.portMatrix.append(scroll);
+
+  const layoutNote = document.createElement("p");
+  layoutNote.className = "switch-layout-note";
+  layoutNote.textContent = layout.layoutNote;
+  nodes.portMatrix.append(layoutNote);
+  renderAuxiliaryInterfaces(layout.logical, "Logical / management interfaces");
+  renderAuxiliaryInterfaces(layout.unclassified, "Unclassified interfaces");
+}
+
+function parsePhysicalInterface(value) {
+  const interfaceName = shortInterfaceName(value);
+  const match = interfaceName.match(/^(Et|Gi|Te|Fa)(\d+(?:\/\d+)*)$/i);
+  if (!match) {
+    return null;
+  }
+  const path = match[2].split("/").map(Number);
+  if (path.some((part) => !Number.isFinite(part))) {
+    return null;
+  }
+  return {
+    interface: value,
+    prefix: match[1],
+    path,
+    number: path[path.length - 1],
+    slot: path.slice(0, -1).join("/") || "default",
+  };
+}
+
+function isLogicalOrManagementInterface(value) {
+  return /^(Po|Port-channel|Port-Channel|Vl|Vlan|Lo|Loopback|CPU|Ma|Mgmt|Management)/i.test(String(value || ""));
+}
+
+function isCompleteNumberRange(numbers, start, end) {
+  const values = new Set(numbers);
+  for (let number = start; number <= end; number += 1) {
+    if (!values.has(number)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isConfirmedHpeReferenceLayout(device, numbers) {
+  return /^(hpe|hp)$/i.test(String(device?.vendor || "")) &&
+    /1920[- ]?24g/i.test(String(device?.platform || "")) &&
+    isCompleteNumberRange(numbers, 1, 28);
+}
+
+function buildPortBanks(items, size = 12) {
+  const banks = new Map();
+  for (const item of items) {
+    const start = Math.floor((item.number - 1) / size) * size + 1;
+    const key = `${start}-${start + size - 1}`;
+    if (!banks.has(key)) {
+      banks.set(key, { label: key, start, end: start + size - 1, items: [], singleRow: false });
+    }
+    banks.get(key).items.push(item);
+  }
+  return Array.from(banks.values()).sort((left, right) => left.start - right.start);
+}
+
+function buildPhysicalPortGroups(ports) {
+  const physical = [];
+  const logical = [];
+  const unclassified = [];
+  for (const port of ports) {
+    const parsed = parsePhysicalInterface(port.interface);
+    if (parsed) {
+      physical.push({ ...parsed, port });
+    } else if (isLogicalOrManagementInterface(port.interface)) {
+      logical.push(port);
+    } else {
+      unclassified.push(port);
+    }
+  }
+  physical.sort((left, right) => String(left.interface).localeCompare(String(right.interface), undefined, { numeric: true }));
+  const grouped = new Map();
+  for (const item of physical) {
+    const key = `${item.prefix}:${item.slot}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
+    }
+    grouped.get(key).push(item);
+  }
+  const groups = [];
+  let specializedLayout = false;
+  for (const [key, items] of grouped) {
+    const numbers = items.map((item) => item.number);
+    let banks;
+    let label = key.replace(":default", " ports").replace(":", " slot ");
+    if (isConfirmedHpeReferenceLayout(state.selectedDevice, numbers)) {
+      specializedLayout = true;
+      const primary = items.filter((item) => item.number <= 24);
+      const additional = items.filter((item) => item.number >= 25);
+      banks = buildPortBanks(primary, 8);
+      if (additional.length) {
+        banks.push({ label: "Additional ports", start: 25, end: 28, items: additional, singleRow: true });
+      }
+      label = "HPE 24 + 4 reference layout";
+    } else if (isCompleteNumberRange(numbers, 1, 48)) {
+      specializedLayout = true;
+      const primary = items.filter((item) => item.number <= 48);
+      const additional = items.filter((item) => item.number >= 49);
+      banks = buildPortBanks(primary, 12);
+      if (additional.length) {
+        banks.push(...buildPortBanks(additional, 4).map((bank) => ({ ...bank, label: "Additional ports" })));
+      }
+      label = `${label} · 48-port logical faceplate`;
+    } else {
+      banks = buildPortBanks(items, 12);
+    }
+    groups.push({ key, label, banks });
+  }
+  return {
+    groups,
+    logical: logical.sort(comparePortInterfaces),
+    unclassified: unclassified.sort(comparePortInterfaces),
+    layoutNote: specializedLayout
+      ? "Logical faceplate based on confirmed contiguous port numbering; physical type metadata unavailable."
+      : "Logical port order · physical slot metadata unavailable.",
+  };
+}
+
+function comparePortInterfaces(left, right) {
+  return String(left.interface).localeCompare(String(right.interface), undefined, { numeric: true });
+}
+
+function renderPhysicalPortGroup(group) {
+  const wrapper = document.createElement("section");
+  wrapper.className = "switch-port-group";
+  wrapper.setAttribute("aria-label", group.label);
+  const banks = document.createElement("div");
+  banks.className = "switch-port-banks";
+  for (const bank of group.banks) {
+    const bankNode = document.createElement("div");
+    bankNode.className = `switch-port-bank${bank.singleRow ? " single-row" : ""}`;
+    const top = bank.items.filter((item) => bank.singleRow || item.number % 2 === 1);
+    const bottom = bank.singleRow ? [] : bank.items.filter((item) => item.number % 2 === 0);
+    const columnCount = bank.singleRow
+      ? Math.max(bank.items.length, 1)
+      : Math.max(Math.ceil((bank.end - bank.start + 1) / 2), 1);
+    const topRow = renderSwitchPortRow(top, bank, columnCount, bank.singleRow ? "Additional" : "Odd-numbered");
+    bankNode.append(topRow);
+    if (!bank.singleRow) {
+      bankNode.append(renderSwitchPortRow(bottom, bank, columnCount, "Even-numbered"));
+    }
+    const label = document.createElement("span");
+    label.className = "switch-bank-label";
+    label.textContent = bank.label;
+    bankNode.append(label);
+    banks.append(bankNode);
+  }
+  const label = document.createElement("span");
+  label.className = "switch-group-label";
+  label.textContent = group.label;
+  wrapper.append(banks, label);
+  return wrapper;
+}
+
+function renderSwitchPortRow(items, bank, columnCount, label) {
+  const row = document.createElement("div");
+  row.className = "switch-port-row";
+  row.style.setProperty("--bank-columns", String(columnCount));
+  row.setAttribute("aria-label", `${label} ports`);
+  for (const item of items) {
+    const button = createSwitchPortButton(item.port, item.number);
+    const column = bank.singleRow ? bank.items.indexOf(item) + 1 : Math.floor((item.number - bank.start) / 2) + 1;
+    button.style.gridColumn = String(Math.max(column, 1));
+    row.append(button);
+  }
+  return row;
+}
+
+function createSwitchPortButton(port, number) {
+  const button = document.createElement("button");
+  const operationalStatus = normalizePortOperationalStatus(port.status);
+  const isSelected = state.selectedPort?.interface === port.interface;
+  const matches = portMatchesFilters(port);
+  button.type = "button";
+  button.className = `switch-port port-state-${operationalStatus}`;
+  button.dataset.interface = port.interface;
+  button.classList.toggle("has-diagnostic-warning", portHealthSeverity(port) === "warning");
+  button.classList.toggle("is-selected", isSelected);
+  button.classList.toggle("is-filtered-out", hasActivePortFilters() && !matches);
+  button.classList.toggle("is-filter-match", hasActivePortFilters() && matches);
+  button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  button.setAttribute("aria-label", buildPortAriaLabel(port));
+  button.title = portTooltip(port);
+
+  const numberNode = document.createElement("span");
+  numberNode.className = "switch-port-number";
+  numberNode.textContent = String(number);
+  const status = document.createElement("span");
+  status.className = "switch-port-status-code";
+  status.textContent = portOperationalCode(operationalStatus);
+  button.append(numberNode, status);
+  if (hasPortErrors(port)) {
+    const warning = document.createElement("span");
+    warning.className = "switch-port-warning";
+    warning.textContent = "!";
+    warning.title = "Diagnostic warning: one or more error counters are above zero";
+    button.append(warning);
+  }
+  button.addEventListener("click", () => {
+    renderPortDetail(port);
+    renderPortMatrix();
+    activateDetailTab("summary");
+  });
+  return button;
+}
+
+function renderAuxiliaryInterfaces(ports, titleText) {
+  if (!ports.length || !nodes.portMatrix) {
     return;
   }
+  const section = document.createElement("section");
+  section.className = "auxiliary-interfaces";
+  const title = document.createElement("h3");
+  title.textContent = titleText;
+  const list = document.createElement("div");
+  list.className = "auxiliary-interface-list";
   for (const port of ports) {
     const button = document.createElement("button");
-    const severity = portSeverity(port);
     button.type = "button";
-    button.className = `port-tile severity-${severity}`;
-    button.dataset.interface = port.interface;
-    if (state.selectedPort?.interface === port.interface) {
-      button.classList.add("selected");
-    }
-    button.title = portTooltip(port);
-    const name = document.createElement("span");
-    name.className = "port-name";
-    name.textContent = shortInterfaceName(port.interface);
-    const status = document.createElement("span");
-    status.className = "port-status";
-    status.textContent = portTileLabel(port);
-    const mode = document.createElement("span");
-    mode.className = "port-mode";
-    mode.textContent = portMode(port);
-    button.append(name, status, mode);
+    button.className = "auxiliary-interface";
+    button.classList.toggle("is-selected", state.selectedPort?.interface === port.interface);
+    button.classList.toggle("is-filtered-out", hasActivePortFilters() && !portMatchesFilters(port));
+    button.setAttribute("aria-pressed", state.selectedPort?.interface === port.interface ? "true" : "false");
+    button.setAttribute("aria-label", buildPortAriaLabel(port));
+    button.textContent = `${shortInterfaceName(port.interface)} · ${text(port.status)}`;
     button.addEventListener("click", () => {
       renderPortDetail(port);
       renderPortMatrix();
       activateDetailTab("summary");
     });
-    nodes.portMatrix.append(button);
+    list.append(button);
   }
+  section.append(title, list);
+  nodes.portMatrix.append(section);
+}
+
+function renderPortStatusLegend() {
+  if (!nodes.portStatusLegend) {
+    return;
+  }
+  nodes.portStatusLegend.replaceChildren();
+  const present = new Set(state.latestPorts.map((port) => normalizePortOperationalStatus(port.status)));
+  const definitions = [
+    ["unconnected", "미연결"],
+    ["connected", "연결됨"],
+    ["admin-disabled", "관리자 비활성"],
+    ["fault", "포트 장애 / errdisabled"],
+    ["unknown", "상태 미확인"],
+  ];
+  for (const [status, label] of definitions) {
+    if (!present.has(status)) {
+      continue;
+    }
+    nodes.portStatusLegend.append(createPortLegendItem(`port-state-${status}`, label));
+  }
+  if (state.latestPorts.length) {
+    nodes.portStatusLegend.append(createPortLegendItem("legend-selection", "선택됨 (UI 상태)"));
+  }
+  if (state.latestPorts.some(hasPortErrors)) {
+    nodes.portStatusLegend.append(createPortLegendItem("legend-warning", "진단 경고 (오류 카운터)"));
+  }
+}
+
+function createPortLegendItem(className, label) {
+  const item = document.createElement("span");
+  item.className = "port-legend-item";
+  const marker = document.createElement("span");
+  marker.className = `port-legend-marker ${className}`;
+  marker.setAttribute("aria-hidden", "true");
+  item.append(marker, document.createTextNode(label));
+  return item;
+}
+
+function portOperationalCode(status) {
+  return ({ connected: "UP", unconnected: "NC", "admin-disabled": "DIS", fault: "ERR", unknown: "?" })[status] || "?";
+}
+
+function buildPortAriaLabel(port) {
+  const parts = [
+    `Interface ${text(port.interface)}`,
+    `status ${text(port.status)}`,
+    `speed ${text(port.speed)}`,
+    `duplex ${text(port.duplex)}`,
+    `VLAN ${text(port.vlan)}`,
+    `description ${text(port.description)}`,
+  ];
+  if (hasPortErrors(port)) {
+    parts.push("diagnostic warning: error counters present");
+  }
+  return parts.join(", ");
 }
 
 function renderPortTable() {
@@ -1143,7 +1584,18 @@ function renderPortTable() {
       activateDetailTab("summary");
     });
     const statusCell = document.createElement("td");
-    statusCell.append(severityBadge(portSeverity(port), portTileLabel(port)));
+    const operationalStatus = normalizePortOperationalStatus(port.status);
+    const statusSeverity = {
+      connected: "normal",
+      unconnected: "down",
+      "admin-disabled": "maintenance",
+      fault: "critical",
+      unknown: "unknown",
+    }[operationalStatus];
+    const statusLabel = hasPortErrors(port)
+      ? `${text(port.status)} · diagnostic warning`
+      : text(port.status);
+    statusCell.append(severityBadge(statusSeverity, statusLabel));
     appendCells(row, [
       shortInterfaceName(port.interface),
     ]);
@@ -1174,58 +1626,54 @@ function renderPortEmptyState(message) {
 }
 
 function filteredPorts() {
-  return state.latestPorts.filter((port) => {
-    const severity = portSeverity(port);
-    if (state.portStatusFilter !== "all") {
-      const matchesStatus =
-        (state.portStatusFilter === "error" && severity === "critical") ||
-        (state.portStatusFilter === "down" && severity === "down") ||
-        (state.portStatusFilter === "disabled" && severity === "maintenance") ||
-        (state.portStatusFilter === "up" && severity === "normal") ||
-        (state.portStatusFilter === "unknown" && severity === "unknown");
-      if (!matchesStatus) {
-        return false;
-      }
-    }
-    if (state.portModeFilter !== "all" && portMode(port) !== state.portModeFilter) {
+  return state.latestPorts.filter(portMatchesFilters);
+}
+
+function hasActivePortFilters() {
+  return state.portStatusFilter !== "all" ||
+    state.portModeFilter !== "all" ||
+    Boolean(state.portVlanFilter) ||
+    Boolean(state.portSearchQuery);
+}
+
+function portMatchesFilters(port) {
+  const operationalStatus = normalizePortOperationalStatus(port.status);
+  if (state.portStatusFilter !== "all") {
+    const matchesStatus =
+      (state.portStatusFilter === "error" && (hasPortErrors(port) || operationalStatus === "fault")) ||
+      (state.portStatusFilter === "down" && operationalStatus === "unconnected") ||
+      (state.portStatusFilter === "disabled" && operationalStatus === "admin-disabled") ||
+      (state.portStatusFilter === "up" && operationalStatus === "connected") ||
+      (state.portStatusFilter === "unknown" && operationalStatus === "unknown");
+    if (!matchesStatus) {
       return false;
     }
-    if (state.portVlanFilter && !String(port.vlan || "").toLowerCase().includes(state.portVlanFilter)) {
+  }
+  if (state.portModeFilter !== "all" && portMode(port) !== state.portModeFilter) {
+    return false;
+  }
+  if (state.portVlanFilter && !String(port.vlan || "").toLowerCase().includes(state.portVlanFilter)) {
+    return false;
+  }
+  if (state.portSearchQuery) {
+    const haystack = [
+      port.interface,
+      port.description,
+      port.status,
+      port.speed,
+      port.duplex,
+      port.neighbor_name,
+      port.neighbor_ip,
+    ].join(" ").toLowerCase();
+    if (!haystack.includes(state.portSearchQuery)) {
       return false;
     }
-    if (state.portSearchQuery) {
-      const haystack = [
-        port.interface,
-        port.description,
-        port.status,
-        port.speed,
-        port.duplex,
-        port.neighbor_name,
-        port.neighbor_ip,
-      ].join(" ").toLowerCase();
-      if (!haystack.includes(state.portSearchQuery)) {
-        return false;
-      }
-    }
-    return true;
-  });
+  }
+  return true;
 }
 
 function portTileLabel(port) {
-  const severity = portSeverity(port);
-  if (severity === "critical") {
-    return hasPortErrors(port) ? "ERR" : "CRIT";
-  }
-  if (severity === "down") {
-    return "DOWN";
-  }
-  if (severity === "maintenance") {
-    return "DIS";
-  }
-  if (severity === "unknown") {
-    return "UNK";
-  }
-  return "UP";
+  return portOperationalCode(normalizePortOperationalStatus(port?.status));
 }
 
 function looksLikePortInterface(value) {
@@ -1287,13 +1735,7 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
     ["Recent Changes", "No stored history yet."],
   ];
 
-  for (const [label, value] of facts) {
-    const dt = document.createElement("dt");
-    dt.textContent = label;
-    const dd = document.createElement("dd");
-    dd.textContent = text(value);
-    nodes.portDetailFacts.append(dt, dd);
-  }
+  appendFacts(nodes.portDetailFacts, facts);
   nodes.portDetailState.className = "summary-box ok";
   nodes.portDetailState.textContent = "Stored parsed observation loaded. Documentation/reference data is not treated as live truth.";
   renderPortAuxiliaryDetail(port);
@@ -1314,13 +1756,7 @@ function renderPortAuxiliaryDetail(port) {
       ["Tx Errors", port.tx_errors || 0],
       ["Last Observed", port.source_timestamp],
     ];
-    for (const [label, value] of rows) {
-      const dt = document.createElement("dt");
-      dt.textContent = label;
-      const dd = document.createElement("dd");
-      dd.textContent = text(value);
-      list.append(dt, dd);
-    }
+    appendFacts(list, rows);
     nodes.portHealthSummary.className = "detail-section";
     nodes.portHealthSummary.append(list);
   }
@@ -1338,13 +1774,7 @@ function renderPortAuxiliaryDetail(port) {
       ["Neighbor IP", port.neighbor_ip],
       ["Neighbor Platform", port.neighbor_platform],
     ];
-    for (const [label, value] of rows) {
-      const dt = document.createElement("dt");
-      dt.textContent = label;
-      const dd = document.createElement("dd");
-      dd.textContent = text(value);
-      list.append(dt, dd);
-    }
+    appendFacts(list, rows);
     nodes.vlanMacSummary.className = "detail-section";
     nodes.vlanMacSummary.append(list);
   }
@@ -1488,13 +1918,7 @@ function renderConnectionDiagnostic(payload) {
     ["Other Port Events", payload.other_port_assessment],
     ["Assessment", payload.conclusion],
   ];
-  for (const [label, value] of rows) {
-    const dt = document.createElement("dt");
-    dt.textContent = label;
-    const dd = document.createElement("dd");
-    dd.textContent = text(value);
-    facts.append(dt, dd);
-  }
+  appendFacts(facts, rows);
 
   const events = document.createElement("ul");
   events.className = "connection-event-list";
@@ -1571,13 +1995,7 @@ function renderReferencePortDetail(result) {
     ["Summary", result.summary],
     ["Recent Changes", "No stored history yet."],
   ];
-  for (const [label, value] of facts) {
-    const dt = document.createElement("dt");
-    dt.textContent = label;
-    const dd = document.createElement("dd");
-    dd.textContent = text(value);
-    nodes.portDetailFacts.append(dt, dd);
-  }
+  appendFacts(nodes.portDetailFacts, facts);
   nodes.portDetailState.className = "summary-box warn";
   nodes.portDetailState.textContent = "Reference match only. Run read-only collection before treating this as live state.";
   nodes.portHealthSummary && (nodes.portHealthSummary.textContent = "Reference match only. Run collection before using health counters.");
@@ -1667,7 +2085,7 @@ async function collectSelected() {
     await loadAudit();
     await loadDashboard();
     await loadDiagnostics();
-    await loadPorts();
+    await loadPorts(state.selectionRequestId, { trigger: "collection" });
     if (selectedInterface && state.selectedDevice) {
       await loadPortDetail(state.selectedDevice.device_id, selectedInterface);
     }
@@ -3481,7 +3899,16 @@ nodes.refreshAudit?.addEventListener("click", () => {
   loadAudit().catch((error) => setStatus(error.message, false));
 });
 nodes.portRefresh?.addEventListener("click", () => {
-  loadPorts().catch((error) => setStatus(error.message, false));
+  clearPortRefreshTimer();
+  loadPorts(state.selectionRequestId, { trigger: "manual" }).catch((error) => {
+    if (error?.name !== "AbortError") {
+      setStatus(error.message, false);
+    }
+  });
+});
+nodes.portRefreshPeriod?.addEventListener("change", () => {
+  state.portRefreshPeriod = Number(nodes.portRefreshPeriod.value) || 0;
+  schedulePortRefresh();
 });
 nodes.portStatusFilter?.addEventListener("change", () => {
   state.portStatusFilter = nodes.portStatusFilter.value;
@@ -3552,6 +3979,26 @@ nodes.purposeSelect?.addEventListener("change", () => {
   setPreviewStatus(`Purpose '${state.selectedPurpose}' selected. Click Preview to review the read-only commands.`);
 });
 setupSidebarNavigation();
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    clearPortRefreshTimer();
+    cancelPortRefreshRequest();
+    setPortRefreshBusy(false);
+    return;
+  }
+  if (portAutoRefreshEnabled()) {
+    loadPorts(state.selectionRequestId, { trigger: "visibility" }).catch((error) => {
+      if (error?.name !== "AbortError") {
+        setStatus(error.message, false);
+      }
+    });
+  }
+});
+
+window.addEventListener("pagehide", () => {
+  resetPortRefreshForSelection();
+});
 
 window.addEventListener("resize", () => {
   renderTopologyMap();

@@ -8,7 +8,7 @@ from ..audit import append_audit_event, new_audit_event, redact_text
 from ..collector import CollectionQueue, CollectorRegistry, CommandResult
 from ..correlation import build_port_endpoint_trace
 from ..credentials import CredentialMappingError
-from ..inventory import InventoryError, get_device, load_devices
+from ..inventory import InventoryError, InventoryRepository
 from ..models import CommandPlan, Device
 from ..observations import store_collection_observation
 from ..policy import CommandPolicyError, allowed_purposes, build_command_plan
@@ -38,7 +38,7 @@ class CollectionWorkflow:
     def __init__(
         self,
         *,
-        inventory_path: str | Path,
+        inventory: InventoryRepository,
         audit_log_path: str | Path,
         data_dir: str | Path,
         command_executor: object,
@@ -47,7 +47,7 @@ class CollectionWorkflow:
         collector_registry: CollectorRegistry,
         monitoring_hub: MonitoringHub,
     ) -> None:
-        self.inventory_path = inventory_path
+        self.inventory = inventory
         self.audit_log_path = audit_log_path
         self.data_dir = data_dir
         self.command_executor = command_executor
@@ -254,7 +254,7 @@ class CollectionWorkflow:
 
     def _device_or_fail(self, device_id: str) -> Device:
         try:
-            return get_device(load_devices(self.inventory_path), device_id)
+            return self.inventory.get_device(device_id)
         except InventoryError as exc:
             raise WorkflowError(404, str(exc)) from exc
 

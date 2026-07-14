@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Network AI MVP Operations</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/static/styles.css?v=20260714-3" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260714-4" />
   </head>
   <body data-page="operations" class="operations-page">
     <header class="topbar">
@@ -165,12 +165,29 @@
               <h2 id="portMatrixTitle">Port Matrix View</h2>
               <span id="portMatrixMeta" class="muted">Select a device to load latest parsed port state.</span>
             </div>
-            <div class="panel-actions">
-              <button id="portRefresh" type="button" class="secondary-button">Refresh Ports</button>
+          </div>
+
+          <div id="portMatrix" class="port-matrix" aria-live="polite" aria-busy="false"></div>
+
+          <div id="portMatrixSummary" class="port-summary-line" aria-label="Port status summary"></div>
+
+          <div class="port-refresh-row">
+            <span class="port-refresh-note">Stored observations only · refresh does not run collection or device CLI.</span>
+            <div class="port-refresh-controls">
+              <label for="portRefreshPeriod">Refresh Period</label>
+              <select id="portRefreshPeriod">
+                <option value="0">Off</option>
+                <option value="15000">15 seconds</option>
+                <option value="30000" selected>30 seconds</option>
+                <option value="60000">60 seconds</option>
+              </select>
+              <button id="portRefresh" type="button" class="secondary-button">Refresh</button>
             </div>
           </div>
 
-          <div id="portMatrixSummary" class="metric-strip" aria-label="Port status summary"></div>
+          <div class="port-matrix-divider" role="presentation"></div>
+
+          <div id="portStatusLegend" class="port-status-legend" aria-label="Port status legend"></div>
 
           <div class="filter-bar" aria-label="Port filters">
             <label class="filter-control">
@@ -201,8 +218,6 @@
               <input id="portSearchInput" type="search" placeholder="Et3, uplink, outpatient" />
             </label>
           </div>
-
-          <div id="portMatrix" class="port-matrix" aria-live="polite"></div>
 
           <details class="port-table-details">
             <summary>Table view for detailed analysis</summary>
@@ -398,6 +413,6 @@
       </aside>
     </main>
 
-    <script src="/static/app.js?v=20260714-3" defer></script>
+    <script src="/static/app.js?v=20260714-6" defer></script>
   </body>
 </html>

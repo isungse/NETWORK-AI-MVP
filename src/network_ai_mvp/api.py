@@ -12,8 +12,8 @@ from .collector import CollectionQueue, CollectorRegistry
 from .credentials import resolve_credential_path
 from .diagnostics import assess_device_risks, summarize_findings
 from .executor import PowerShellTelnetReadOnlyExecutor
-from .inventory import InventoryError, get_device, load_devices
-from .models import CommandPlan, Device
+from .inventory import InventoryError, InventoryRepository
+from .models import Device
 from .neighbors import get_neighbors_for_device
 from .observations import find_latest_port, read_latest_observation, read_latest_port_observation
 from .port_diagnostics import build_port_connection_diagnostic, build_recent_link_diagnostic, ping_target
@@ -59,10 +59,11 @@ def create_app(
 
     command_executor = executor or PowerShellTelnetReadOnlyExecutor()
     run_ping = ping_executor or ping_target
+    inventory = InventoryRepository(inventory_path)
     collection_queue = CollectionQueue()
     monitoring_hub = MonitoringHub()
     collection_workflow = CollectionWorkflow(
-        inventory_path=inventory_path,
+        inventory=inventory,
         audit_log_path=audit_log_path,
         data_dir=data_dir,
         command_executor=command_executor,
@@ -81,6 +82,18 @@ def create_app(
 
     app = FastAPI(title="Network AI MVP", version="0.1.0", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    def inventory_devices() -> list[Device]:
+        try:
+            return inventory.list_devices()
+        except InventoryError as exc:
+            raise HTTPException(status_code=503, detail=f"Inventory unavailable: {exc}") from exc
+
+    def inventory_device(device_id: str) -> Device:
+        try:
+            return inventory.get_device(device_id)
+        except InventoryError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/", include_in_schema=False)
     def index(): return FileResponse(STATIC_DIR / "index.html")
@@ -107,34 +120,23 @@ def create_app(
 
     @app.get("/devices")
     def devices():
-        try:
-            return [public_device(device, DEFAULT_COLLECTOR_REGISTRY) for device in load_devices(inventory_path)]
-        except InventoryError as exc:
-            raise HTTPException(status_code=503, detail=f"Inventory unavailable: {exc}") from exc
+        return [public_device(device, DEFAULT_COLLECTOR_REGISTRY) for device in inventory_devices()]
 
     @app.get("/devices/{device_id}")
     def device_detail(device_id: str):
-        try:
-            return public_device(get_device(load_devices(inventory_path), device_id), DEFAULT_COLLECTOR_REGISTRY)
-        except InventoryError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return public_device(inventory_device(device_id), DEFAULT_COLLECTOR_REGISTRY)
 
     @app.get("/devices/{device_id}/command-plan/{purpose}")
     def command_plan(device_id: str, purpose: str):
         try:
-            plan = _build_plan(inventory_path, device_id, purpose)
-        except InventoryError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            plan = build_command_plan(inventory_device(device_id), purpose)
         except CommandPolicyError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return public_command_plan(plan, DEFAULT_COLLECTOR_REGISTRY)
 
     @app.get("/devices/{device_id}/diagnostics")
     def device_diagnostics(device_id: str):
-        try:
-            device = get_device(load_devices(inventory_path), device_id)
-        except InventoryError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        device = inventory_device(device_id)
         findings = assess_device_risks(
             device,
             audit_events=read_audit_events(audit_log_path, limit=100),
@@ -149,10 +151,7 @@ def create_app(
 
     @app.get("/devices/{device_id}/neighbors")
     def device_neighbors(device_id: str):
-        try:
-            device = get_device(load_devices(inventory_path), device_id)
-        except InventoryError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        device = inventory_device(device_id)
 
         neighbors = get_neighbors_for_device(backbone_neighbors_path, device.device_id)
         return {
@@ -166,14 +165,12 @@ def create_app(
     def topology():
         try:
             return build_topology(
-                devices=load_devices(inventory_path),
+                devices=inventory_devices(),
                 data_dir=data_dir,
                 backbone_neighbors_path=backbone_neighbors_path,
                 audit_log_path=audit_log_path,
                 collector_registry=DEFAULT_COLLECTOR_REGISTRY,
             )
-        except InventoryError as exc:
-            raise HTTPException(status_code=503, detail=f"Inventory unavailable: {exc}") from exc
         except ValueError as exc:
             raise HTTPException(status_code=503, detail=f"Topology reference unavailable: {exc}") from exc
 
@@ -187,10 +184,7 @@ def create_app(
 
     @app.get("/devices/{device_id}/ports/latest")
     def device_ports_latest(device_id: str):
-        try:
-            device = get_device(load_devices(inventory_path), device_id)
-        except InventoryError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        device = inventory_device(device_id)
 
         latest_observation = read_latest_observation(data_dir, device.device_id)
         observation = read_latest_port_observation(data_dir, device.device_id)
@@ -245,10 +239,7 @@ def create_app(
 
     @app.get("/devices/{device_id}/ports/{interface:path}/latest")
     def device_port_latest(device_id: str, interface: str):
-        try:
-            device = get_device(load_devices(inventory_path), device_id)
-        except InventoryError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        device = inventory_device(device_id)
 
         port = find_latest_port(data_dir, device.device_id, interface)
         if not port:
@@ -268,10 +259,7 @@ def create_app(
 
     @app.get("/devices/{device_id}/port-connection-diagnostic")
     def port_connection_diagnostic(device_id: str, interface: str, window_minutes: int = 10):
-        try:
-            get_device(load_devices(inventory_path), device_id)
-        except InventoryError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        inventory_device(device_id)
         return build_port_connection_diagnostic(
             data_dir,
             device_id=device_id,
@@ -281,10 +269,7 @@ def create_app(
 
     @app.get("/devices/{device_id}/link-diagnostics/recent")
     def recent_link_diagnostic(device_id: str, window_minutes: int = 10):
-        try:
-            get_device(load_devices(inventory_path), device_id)
-        except InventoryError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        inventory_device(device_id)
         return build_recent_link_diagnostic(
             data_dir,
             device_id=device_id,
@@ -293,10 +278,7 @@ def create_app(
 
     @app.post("/devices/{device_id}/port-connection-diagnostic/ping")
     def port_connection_ping(device_id: str, interface: str, target_ip: str):
-        try:
-            get_device(load_devices(inventory_path), device_id)
-        except InventoryError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        inventory_device(device_id)
         diagnostic = build_port_connection_diagnostic(
             data_dir,
             device_id=device_id,
@@ -320,7 +302,7 @@ def create_app(
         try:
             results = search_network_state(
                 query=q,
-                inventory_path=inventory_path,
+                devices=inventory_devices(),
                 observations_dir=data_dir,
                 backbone_neighbors_path=backbone_neighbors_path,
             )
@@ -352,11 +334,6 @@ def create_app(
         return public_job_snapshot(snapshot)
 
     return app
-
-
-def _build_plan(inventory_path: str | Path, device_id: str, purpose: str) -> CommandPlan:
-    return build_command_plan(get_device(load_devices(inventory_path), device_id), purpose)
-
 
 def _workflow_response(callback, *args):
     try:

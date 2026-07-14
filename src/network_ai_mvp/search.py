@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
-from .inventory import load_devices
+from .models import Device
 from .neighbors import get_neighbors_for_device
 from .observations import latest_ports
 from .parsers import canonical_mac, normalize_mac, short_interface_name
@@ -13,7 +13,7 @@ from .parsers import canonical_mac, normalize_mac, short_interface_name
 def search_network_state(
     *,
     query: str,
-    inventory_path: str | Path,
+    devices: Iterable[Device],
     observations_dir: str | Path,
     backbone_neighbors_path: str | Path,
 ) -> list[dict[str, Any]]:
@@ -21,10 +21,10 @@ def search_network_state(
     if not normalized:
         return []
 
-    devices = load_devices(inventory_path)
+    device_list = tuple(devices)
     results: list[dict[str, Any]] = []
 
-    for device in devices:
+    for device in device_list:
         haystack = " ".join(
             [
                 device.device_id,
@@ -64,7 +64,7 @@ def search_network_state(
                     }
                 )
 
-    for device in devices:
+    for device in device_list:
         for neighbor in get_neighbors_for_device(backbone_neighbors_path, device.device_id):
             neighbor_data = asdict(neighbor)
             if _matches(normalized, " ".join(str(value or "") for value in neighbor_data.values())):
