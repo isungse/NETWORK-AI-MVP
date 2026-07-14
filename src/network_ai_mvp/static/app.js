@@ -33,6 +33,7 @@ const state = {
   selectionRequestId: 0,
   selectionLoading: true,
   selectedDiagnostics: null,
+  connectionDiagnosticRequestId: 0,
 };
 
 const page = document.body.dataset.page || "operations";
@@ -71,6 +72,7 @@ const nodes = {
   diagnosticFindings: document.querySelector("#diagnosticFindings"),
   detailSeverity: document.querySelector("#detailSeverity"),
   commandPreview: document.querySelector("#commandPreview"),
+  previewStatus: document.querySelector("#previewStatus"),
   portMatrixMeta: document.querySelector("#portMatrixMeta"),
   portMatrixSummary: document.querySelector("#portMatrixSummary"),
   portMatrix: document.querySelector("#portMatrix"),
@@ -81,6 +83,10 @@ const nodes = {
   portVlanFilter: document.querySelector("#portVlanFilter"),
   portSearchInput: document.querySelector("#portSearchInput"),
   portHealthSummary: document.querySelector("#portHealthSummary"),
+  portConnectionDiagnostic: document.querySelector("#portConnectionDiagnostic"),
+  pingTarget: document.querySelector("#pingTarget"),
+  pingTest: document.querySelector("#pingTest"),
+  pingResult: document.querySelector("#pingResult"),
   vlanMacSummary: document.querySelector("#vlanMacSummary"),
   collectionSummary: document.querySelector("#collectionSummary"),
   collectionMetrics: document.querySelector("#collectionMetrics"),
@@ -523,6 +529,8 @@ async function selectDevice(deviceId) {
   renderDashboard();
   renderDeviceFacts(state.selectedDevice);
   renderCommandPlan(null);
+  renderCommandPreview(null);
+  renderConnectionDiagnostic(null);
   renderPortDetail(null);
   renderCheckResults(null);
   updateCheckButton();
@@ -588,28 +596,62 @@ async function loadPurposes(requestId = state.selectionRequestId) {
   nodes.collect.disabled = true;
   state.previewReady = false;
   state.previewAction = "collect";
-  if (state.selectedPurpose) {
-    await loadCommandPlan({ requestId, deviceId });
-  }
+  state.latestPlan = null;
+  renderCommandPlan(null);
+  renderCommandPreview(null);
+  setPreviewStatus(
+    state.selectedPurpose
+      ? `Purpose '${state.selectedPurpose}' selected. Click Preview to review the read-only commands.`
+      : "No diagnostic purpose is available for this device.",
+  );
 }
 
 async function loadCommandPlan({ requestId = state.selectionRequestId, deviceId = state.selectedDevice?.device_id } = {}) {
-  if (!nodes.collect) {
+  if (!nodes.collect || !nodes.loadPlan) {
     return;
   }
   if (!state.selectedDevice || !state.selectedPurpose) {
     return;
   }
   const purpose = state.selectedPurpose;
-  const plan = await api(
-    `/devices/${encodeURIComponent(deviceId)}/command-plan/${encodeURIComponent(purpose)}`,
-  );
-  if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId || state.selectedPurpose !== purpose) {
-    return;
+  nodes.loadPlan.disabled = true;
+  nodes.loadPlan.textContent = "Loading...";
+  nodes.collect.disabled = true;
+  state.previewReady = false;
+  state.latestPlan = null;
+  renderCommandPlan(null);
+  renderCommandPreview(null);
+  setPreviewStatus(`Loading '${purpose}' preview...`);
+  try {
+    const plan = await api(
+      `/devices/${encodeURIComponent(deviceId)}/command-plan/${encodeURIComponent(purpose)}`,
+    );
+    if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId || state.selectedPurpose !== purpose) {
+      return null;
+    }
+    state.latestPlan = plan;
+    renderCommandPlan(state.latestPlan);
+    renderCommandPreview(state.latestPlan, { action: "collect" });
+    setPreviewStatus(`Preview ready: ${plan.commands.length} allowlisted read-only command(s).`);
+    return plan;
+  } catch (error) {
+    if (requestId === state.selectionRequestId && state.selectedDevice?.device_id === deviceId) {
+      setPreviewStatus(`Preview failed: ${error.message}`);
+      renderSummary(error.message, "error");
+    }
+    throw error;
+  } finally {
+    if (requestId === state.selectionRequestId && state.selectedDevice?.device_id === deviceId) {
+      nodes.loadPlan.disabled = !state.selectedPurpose;
+      nodes.loadPlan.textContent = "Preview";
+    }
   }
-  state.latestPlan = plan;
-  renderCommandPlan(state.latestPlan);
-  renderCommandPreview(state.latestPlan, { action: "collect" });
+}
+
+function setPreviewStatus(message) {
+  if (nodes.previewStatus) {
+    nodes.previewStatus.textContent = message;
+  }
 }
 
 function renderCommandPlan(plan) {
@@ -700,6 +742,7 @@ function expectedOutputForPurpose(purpose) {
     interfaces: "Interface status, speed/duplex, descriptions, and error counters",
     endpoints: "Interface descriptions, MAC table, and ARP correlation",
     "port-endpoints": "Port status, descriptions, MAC addresses, and ARP correlation",
+    "link-diagnostics": "Link state, errors, VLAN/STP, endpoint MAC/IP, device clock, and link event logs",
     topology: "CDP/LLDP neighbor relationships and link evidence",
     switching: "VLAN, trunk, spanning-tree, MAC table, and switching state",
     baseline: "Version, hostname, interface overview, and baseline inventory evidence",
@@ -1218,6 +1261,7 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
     nodes.portDetailState.textContent = message;
     nodes.portHealthSummary && (nodes.portHealthSummary.textContent = "Select a port to review counters and status.");
     nodes.vlanMacSummary && (nodes.vlanMacSummary.textContent = "Select a parsed port to inspect VLAN, mode, endpoints, and neighbors.");
+    renderConnectionDiagnostic(null);
     setSeverityBadge(nodes.detailSeverity, state.selectedDevice ? deviceStatus(state.selectedDevice) : "unknown");
     return;
   }
@@ -1250,6 +1294,7 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
   nodes.portDetailState.className = "summary-box ok";
   nodes.portDetailState.textContent = "Stored parsed observation loaded. Documentation/reference data is not treated as live truth.";
   renderPortAuxiliaryDetail(port);
+  loadPortConnectionDiagnostic(port).catch((error) => renderConnectionDiagnostic({ error: error.message }));
 }
 
 function renderPortAuxiliaryDetail(port) {
@@ -1302,6 +1347,151 @@ function renderPortAuxiliaryDetail(port) {
   }
 }
 
+async function loadPortConnectionDiagnostic(port) {
+  if (!state.selectedDevice || !port) {
+    renderConnectionDiagnostic(null);
+    return;
+  }
+  const requestId = ++state.connectionDiagnosticRequestId;
+  const deviceId = state.selectedDevice.device_id;
+  const interfaceName = port.interface;
+  renderConnectionDiagnostic({ loading: true, interface: interfaceName });
+  const payload = await api(
+    `/devices/${encodeURIComponent(deviceId)}/port-connection-diagnostic?interface=${encodeURIComponent(interfaceName)}`,
+  );
+  if (
+    requestId !== state.connectionDiagnosticRequestId ||
+    state.selectedDevice?.device_id !== deviceId ||
+    state.selectedPort?.interface !== interfaceName
+  ) {
+    return;
+  }
+  renderConnectionDiagnostic(payload);
+}
+
+function renderConnectionDiagnostic(payload) {
+  if (!nodes.portConnectionDiagnostic) {
+    return;
+  }
+  nodes.portConnectionDiagnostic.replaceChildren();
+  if (nodes.pingTarget) {
+    nodes.pingTarget.value = "";
+    nodes.pingTarget.disabled = true;
+  }
+  if (nodes.pingTest) {
+    nodes.pingTest.disabled = true;
+    nodes.pingTest.textContent = "Ping Test";
+  }
+  if (nodes.pingResult) {
+    nodes.pingResult.className = "summary-box";
+    nodes.pingResult.textContent = "Ping is limited to an IP currently learned on the selected port.";
+  }
+
+  if (!payload) {
+    nodes.portConnectionDiagnostic.className = "detail-section empty-state";
+    nodes.portConnectionDiagnostic.textContent = "Select a port to review link events, VLAN, and endpoint evidence.";
+    return;
+  }
+  if (payload.loading) {
+    nodes.portConnectionDiagnostic.className = "detail-section empty-state";
+    nodes.portConnectionDiagnostic.textContent = `Loading connection evidence for ${text(payload.interface)}...`;
+    return;
+  }
+  if (payload.error || !payload.data_available) {
+    nodes.portConnectionDiagnostic.className = "detail-section empty-state";
+    nodes.portConnectionDiagnostic.textContent = payload.error || payload.message || "No connection evidence is available.";
+    return;
+  }
+
+  const port = payload.port || {};
+  nodes.portConnectionDiagnostic.className = "detail-section connection-diagnostic";
+  const head = document.createElement("div");
+  head.className = "connection-diagnostic-head";
+  const title = document.createElement("strong");
+  title.textContent = `${shortInterfaceName(payload.interface)} Connection State`;
+  head.append(title, severityBadge(payload.severity || portSeverity(port), portTileLabel(port)));
+
+  const facts = document.createElement("dl");
+  facts.className = "facts compact-facts";
+  const lastEvent = payload.last_link_event;
+  const history = Array.isArray(payload.history) ? payload.history : [];
+  const rows = [
+    ["Current State", `${text(port.status)} · ${text(port.speed)} / ${text(port.duplex)}`],
+    ["VLAN / Mode", `${text(port.vlan)} / ${portMode(port)}`],
+    ["Endpoint IP", listText(payload.endpoint_ips)],
+    ["Endpoint MAC", listText(payload.endpoint_macs)],
+    ["Port Errors", payload.total_errors || 0],
+    ["Last Link Event", lastEvent ? `${formatObservedAt(lastEvent.timestamp)} · ${lastEvent.event.toUpperCase()} ${lastEvent.state.toUpperCase()}` : "No stored LINK/LINEPROTO event"],
+    ["State History", history.length ? history.map((item) => `${formatObservedAt(item.timestamp)} ${item.status}`).join(" → ") : "No stored state transition"],
+    ["Assessment", payload.conclusion],
+  ];
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = text(value);
+    facts.append(dt, dd);
+  }
+
+  const events = document.createElement("ul");
+  events.className = "connection-event-list";
+  for (const event of (payload.link_events || []).slice(-6)) {
+    const item = document.createElement("li");
+    item.className = "connection-event";
+    const eventName = document.createElement("strong");
+    eventName.textContent = `${event.event} ${event.state}`;
+    const time = document.createElement("time");
+    time.dateTime = event.timestamp;
+    time.textContent = formatObservedAt(event.timestamp);
+    item.append(eventName, time);
+    events.append(item);
+  }
+  if (!events.children.length) {
+    const item = document.createElement("li");
+    item.className = "muted";
+    item.textContent = "No LINK/LINEPROTO events stored for this port.";
+    events.append(item);
+  }
+  nodes.portConnectionDiagnostic.append(head, facts, events);
+
+  const target = (payload.endpoint_ips || [])[0] || "";
+  if (nodes.pingTarget) {
+    nodes.pingTarget.value = target;
+    nodes.pingTarget.disabled = !target;
+  }
+  if (nodes.pingTest) {
+    nodes.pingTest.disabled = !target;
+  }
+}
+
+async function runSelectedPortPing() {
+  if (!state.selectedDevice || !state.selectedPort || !nodes.pingTarget || !nodes.pingTest || !nodes.pingResult) {
+    return;
+  }
+  const targetIp = nodes.pingTarget.value.trim();
+  if (!targetIp) {
+    return;
+  }
+  nodes.pingTest.disabled = true;
+  nodes.pingTest.textContent = "Testing...";
+  nodes.pingResult.className = "summary-box warn";
+  nodes.pingResult.textContent = `Pinging ${targetIp} from the local diagnostics host...`;
+  try {
+    const payload = await api(
+      `/devices/${encodeURIComponent(state.selectedDevice.device_id)}/port-connection-diagnostic/ping?interface=${encodeURIComponent(state.selectedPort.interface)}&target_ip=${encodeURIComponent(targetIp)}`,
+      { method: "POST" },
+    );
+    nodes.pingResult.className = `summary-box ${payload.success ? "ok" : "error"}`;
+    nodes.pingResult.textContent = `${payload.summary} Target ${payload.target_ip}.`;
+  } catch (error) {
+    nodes.pingResult.className = "summary-box error";
+    nodes.pingResult.textContent = error.message;
+  } finally {
+    nodes.pingTest.textContent = "Ping Test";
+    nodes.pingTest.disabled = false;
+  }
+}
+
 function renderReferencePortDetail(result) {
   if (!nodes.portDetailFacts || !nodes.portDetailState || !nodes.diagnosePort) {
     state.selectedPort = null;
@@ -1329,6 +1519,7 @@ function renderReferencePortDetail(result) {
   nodes.portDetailState.textContent = "Reference match only. Run read-only collection before treating this as live state.";
   nodes.portHealthSummary && (nodes.portHealthSummary.textContent = "Reference match only. Run collection before using health counters.");
   nodes.vlanMacSummary && (nodes.vlanMacSummary.textContent = "Reference match only. Live VLAN/MAC state is not available.");
+  renderConnectionDiagnostic(null);
 }
 
 async function diagnoseSelectedPort() {
@@ -1339,14 +1530,15 @@ async function diagnoseSelectedPort() {
     return;
   }
   const options = Array.from(nodes.purposeSelect.options).map((option) => option.value);
-  if (!options.includes("interfaces")) {
-    renderSummary("No allowlisted interfaces purpose is available for this device.", "error");
+  const purpose = ["link-diagnostics", "port-endpoints", "interfaces"].find((item) => options.includes(item));
+  if (!purpose) {
+    renderSummary("No allowlisted port diagnostic purpose is available for this device.", "error");
     return;
   }
-  state.selectedPurpose = "interfaces";
-  nodes.purposeSelect.value = "interfaces";
+  state.selectedPurpose = purpose;
+  nodes.purposeSelect.value = purpose;
   await loadCommandPlan();
-  renderSummary("Port diagnostic preview loaded. Review the target, risk level, and commands before running diagnostics.", "warn");
+  renderSummary("Connection diagnostic preview loaded. Review the target port and read-only commands before running diagnostics.", "warn");
   activateDetailTab("diagnostics");
 }
 
@@ -1407,11 +1599,15 @@ async function collectSelected() {
     });
     renderSummary(error.message, "error");
   } finally {
+    const selectedInterface = state.selectedPort?.interface;
     nodes.collect.disabled = true;
     await loadAudit();
     await loadDashboard();
     await loadDiagnostics();
     await loadPorts();
+    if (selectedInterface && state.selectedDevice) {
+      await loadPortDetail(state.selectedDevice.device_id, selectedInterface);
+    }
   }
 }
 
@@ -3244,6 +3440,9 @@ nodes.searchInput?.addEventListener("keydown", (event) => {
 nodes.diagnosePort?.addEventListener("click", () => {
   diagnoseSelectedPort().catch((error) => renderSummary(error.message, "error"));
 });
+nodes.pingTest?.addEventListener("click", () => {
+  runSelectedPortPing().catch((error) => renderSummary(error.message, "error"));
+});
 nodes.purposeSelect?.addEventListener("change", () => {
   state.selectedPurpose = nodes.purposeSelect.value;
   state.latestPlan = null;
@@ -3254,7 +3453,7 @@ nodes.purposeSelect?.addEventListener("change", () => {
   if (nodes.collect) {
     nodes.collect.disabled = true;
   }
-  loadCommandPlan().catch((error) => renderSummary(error.message, "error"));
+  setPreviewStatus(`Purpose '${state.selectedPurpose}' selected. Click Preview to review the read-only commands.`);
 });
 setupSidebarNavigation();
 

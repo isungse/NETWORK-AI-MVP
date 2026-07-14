@@ -36,6 +36,25 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(plan.read_only)
         self.assertEqual(plan.commands, ("terminal length 0", "show logging", "show users"))
 
+    def test_cisco_security_logs_plan_is_read_only(self) -> None:
+        device = load_devices("inventory/devices.csv")[0]
+        plan = build_command_plan(device, "security-logs")
+
+        self.assertTrue(plan.read_only)
+        self.assertEqual(plan.commands, ("terminal length 0", "show clock", "show logging"))
+
+    def test_link_diagnostics_plan_combines_link_endpoint_and_log_evidence(self) -> None:
+        for device_id in ("cisco-backbone", "arista-2f-outpatient"):
+            device = [item for item in load_devices("inventory/devices.csv") if item.device_id == device_id][0]
+            plan = build_command_plan(device, "link-diagnostics")
+
+            self.assertTrue(plan.read_only)
+            self.assertIn("show interfaces status", plan.commands)
+            self.assertIn("show mac address-table", plan.commands)
+            self.assertIn("show ip arp", plan.commands)
+            self.assertIn("show spanning-tree", plan.commands)
+            self.assertIn("show logging", plan.commands)
+
     def test_rejects_config_commands(self) -> None:
         with self.assertRaises(CommandPolicyError):
             validate_commands("arista", ["configure terminal"])

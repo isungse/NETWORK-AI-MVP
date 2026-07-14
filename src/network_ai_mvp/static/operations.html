@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Network AI MVP Operations</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/static/styles.css?v=20260710-6" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260714-1" />
   </head>
   <body data-page="operations" class="operations-page">
     <header class="topbar">
@@ -351,6 +351,14 @@
         <section class="detail-pane" data-detail-pane="health">
           <h3>Port Health</h3>
           <div id="portHealthSummary" class="detail-section empty-state">Select a port to review counters and status.</div>
+          <h3>Port Connection Diagnostic</h3>
+          <div id="portConnectionDiagnostic" class="detail-section empty-state">Select a port to review link events, VLAN, and endpoint evidence.</div>
+          <div class="ping-test-controls">
+            <label for="pingTarget">Observed endpoint IP</label>
+            <input id="pingTarget" type="text" inputmode="decimal" placeholder="Select a port with an observed IP" disabled />
+            <button id="pingTest" type="button" class="secondary-button" disabled>Ping Test</button>
+          </div>
+          <div id="pingResult" class="summary-box" aria-live="polite">Ping is limited to an IP currently learned on the selected port.</div>
           <h3>Device Diagnostics</h3>
           <div id="diagnosticSummary" class="summary-box">Select a device.</div>
           <div id="diagnosticFindings" class="finding-list"></div>
@@ -368,7 +376,8 @@
             <select id="purposeSelect" disabled></select>
             <button id="loadPlan" type="button" disabled>Preview</button>
           </div>
-          <div id="commandPreview" class="command-preview empty-state">Select a device and purpose to preview read-only commands before execution.</div>
+          <p id="previewStatus" class="preview-status" aria-live="polite">Select a device and purpose, then click Preview.</p>
+          <div id="commandPreview" class="command-preview empty-state" aria-live="polite">Select a device and purpose to preview read-only commands before execution.</div>
           <section class="command-plan-section" aria-labelledby="planTitle">
             <h3 id="planTitle">Commands to Run</h3>
             <ol id="commandPlan" class="command-list"></ol>
@@ -389,6 +398,6 @@
       </aside>
     </main>
 
-    <script src="/static/app.js?v=20260710-6" defer></script>
+    <script src="/static/app.js?v=20260714-1" defer></script>
   </body>
 </html>

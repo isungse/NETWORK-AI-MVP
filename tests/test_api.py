@@ -411,6 +411,77 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["latest_purpose"], "security-logs")
         self.assertEqual(payload["ports"][0]["interface"], "Et6")
 
+    def test_port_connection_diagnostic_and_observed_ip_ping(self) -> None:
+        device = get_device(load_devices("inventory/devices.csv"), "cisco-backbone")
+        stdout = (
+            "===== show interfaces status =====\n"
+            "Port      Name               Status       Vlan       Duplex  Speed Type\n"
+            "Gi3/15                       connected    1          a-full a-1000 10/100/1000-TX\n"
+            "===== show mac address-table =====\n"
+            "1      9009.d096.cbc5   dynamic ip,ipx,assigned,other GigabitEthernet3/15\n"
+            "===== show ip arp =====\n"
+            "Internet  172.16.1.31  0  9009.d096.cbc5  ARPA  Vlan1\n"
+            "Jul 14 2026 11:39:03 KST: %LINK-3-UPDOWN: "
+            "Interface GigabitEthernet3/15, changed state to up\n"
+        )
+        store_collection_observation(
+            self.data_dir,
+            device=device,
+            result=CommandResult(
+                device_id=device.device_id,
+                hostname=device.hostname,
+                management_ip=device.management_ip,
+                purpose="link-diagnostics",
+                commands=("show interfaces status", "show mac address-table", "show ip arp", "show logging"),
+                stdout=stdout,
+                stderr="",
+                returncode=0,
+            ),
+            timestamp="2026-07-14T02:47:41Z",
+        )
+        ping_calls = []
+
+        def fake_ping(target_ip):
+            ping_calls.append(target_ip)
+            return {
+                "target_ip": target_ip,
+                "success": True,
+                "packets_sent": 4,
+                "packets_received": 4,
+                "packet_loss_percent": 0,
+                "summary": "Ping successful: 4/4 replies, 0% loss.",
+            }
+
+        app = create_app(
+            audit_log_path=self.audit_path,
+            data_dir=self.data_dir,
+            executor=self.executor,
+            credential_resolver=lambda credential_ref: Path(self.temp_dir.name) / f"{credential_ref}.xml",
+            ping_executor=fake_ping,
+        )
+        client = TestClient(app)
+
+        diagnostic = client.get(
+            "/devices/cisco-backbone/port-connection-diagnostic",
+            params={"interface": "Gi3/15"},
+        )
+        ping = client.post(
+            "/devices/cisco-backbone/port-connection-diagnostic/ping",
+            params={"interface": "Gi3/15", "target_ip": "172.16.1.31"},
+        )
+        rejected = client.post(
+            "/devices/cisco-backbone/port-connection-diagnostic/ping",
+            params={"interface": "Gi3/15", "target_ip": "172.16.1.99"},
+        )
+
+        self.assertEqual(diagnostic.status_code, 200)
+        self.assertEqual(diagnostic.json()["port"]["vlan"], "1")
+        self.assertEqual(diagnostic.json()["last_link_event"]["state"], "up")
+        self.assertEqual(ping.status_code, 200)
+        self.assertTrue(ping.json()["success"])
+        self.assertEqual(ping_calls, ["172.16.1.31"])
+        self.assertEqual(rejected.status_code, 400)
+
     def test_device_check_runs_only_allowlisted_purposes_and_returns_check_items(self) -> None:
         stdout = (
             "===== show interfaces status =====\n"

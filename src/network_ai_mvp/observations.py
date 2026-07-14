@@ -124,7 +124,7 @@ def read_latest_port_observation(base_dir: str | Path, device_id: str) -> dict[s
     root = _safe_root(base_dir)
     observation_dir = root / "observations" / _safe_name(device_id)
     latest = read_latest_observation(root, device_id)
-    if latest and isinstance(latest.get("ports"), list) and latest["ports"]:
+    if latest and _has_port_status(latest):
         return latest
     if not observation_dir.exists():
         return None
@@ -144,9 +144,17 @@ def read_latest_port_observation(base_dir: str | Path, device_id: str) -> dict[s
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             LOGGER.warning("Ignoring unreadable observation history %s: %s", path, exc)
             continue
-        if isinstance(payload, dict) and isinstance(payload.get("ports"), list) and payload["ports"]:
+        if isinstance(payload, dict) and _has_port_status(payload):
             return payload
     return None
+
+
+def _has_port_status(payload: dict[str, Any]) -> bool:
+    ports = payload.get("ports")
+    return bool(
+        isinstance(ports, list)
+        and any(isinstance(port, dict) and port.get("status") for port in ports)
+    )
 
 
 def read_observation_index(base_dir: str | Path, device_id: str) -> list[dict[str, Any]]:

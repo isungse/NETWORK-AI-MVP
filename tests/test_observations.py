@@ -110,8 +110,23 @@ class ObservationStoreTests(unittest.TestCase):
             store_collection_observation(
                 temp_dir, device=device, result=security_result, timestamp="2026-06-01T01:00:00Z"
             )
+            store_collection_observation(
+                temp_dir,
+                device=device,
+                result=CommandResult(
+                    device_id=device.device_id,
+                    hostname=device.hostname,
+                    management_ip=device.management_ip,
+                    purpose="switching",
+                    commands=("show mac address-table",),
+                    stdout="22      b42e.9906.7712    DYNAMIC     Et6\n",
+                    stderr="",
+                    returncode=0,
+                ),
+                timestamp="2026-06-01T02:00:00Z",
+            )
 
-            self.assertEqual(read_latest_observation(temp_dir, device.device_id)["purpose"], "security-logs")
+            self.assertEqual(read_latest_observation(temp_dir, device.device_id)["purpose"], "switching")
             port_observation = read_latest_port_observation(temp_dir, device.device_id)
             self.assertIsNotNone(port_observation)
             self.assertEqual(port_observation["purpose"], "interfaces")

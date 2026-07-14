@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
+import subprocess
 from typing import Callable
 
 from .audit import read_audit_events
@@ -14,6 +15,7 @@ from .inventory import InventoryError, get_device, load_devices
 from .models import CommandPlan, Device
 from .neighbors import get_neighbors_for_device
 from .observations import find_latest_port, read_latest_observation, read_latest_port_observation
+from .port_diagnostics import build_port_connection_diagnostic, ping_target
 from .policy import CommandPolicyError, allowed_purposes, build_command_plan
 from .search import search_network_state
 from .services.collection import public_command_plan, public_device, public_job_snapshot
@@ -37,6 +39,7 @@ def create_app(
     data_dir: str | Path = DEFAULT_DATA_DIR,
     executor: PowerShellTelnetReadOnlyExecutor | None = None,
     credential_resolver: Callable[[str], str | Path] = resolve_credential_path,
+    ping_executor: Callable[[str], dict[str, object]] | None = None,
 ):
     try:
         from fastapi import FastAPI, HTTPException
@@ -46,6 +49,7 @@ def create_app(
         raise RuntimeError("Install the API dependencies with: pip install -e .[api]") from exc
 
     command_executor = executor or PowerShellTelnetReadOnlyExecutor()
+    run_ping = ping_executor or ping_target
     collection_queue = CollectionQueue()
     monitoring_hub = MonitoringHub()
     collection_workflow = CollectionWorkflow(
@@ -247,6 +251,42 @@ def create_app(
             "data_available": True,
             "port": port,
         }
+
+    @app.get("/devices/{device_id}/port-connection-diagnostic")
+    def port_connection_diagnostic(device_id: str, interface: str):
+        try:
+            get_device(load_devices(inventory_path), device_id)
+        except InventoryError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return build_port_connection_diagnostic(
+            data_dir,
+            device_id=device_id,
+            interface=interface,
+        )
+
+    @app.post("/devices/{device_id}/port-connection-diagnostic/ping")
+    def port_connection_ping(device_id: str, interface: str, target_ip: str):
+        try:
+            get_device(load_devices(inventory_path), device_id)
+        except InventoryError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        diagnostic = build_port_connection_diagnostic(
+            data_dir,
+            device_id=device_id,
+            interface=interface,
+        )
+        if not diagnostic.get("data_available"):
+            raise HTTPException(status_code=404, detail=str(diagnostic.get("message")))
+        observed_ips = {str(value) for value in diagnostic.get("endpoint_ips") or []}
+        if target_ip not in observed_ips:
+            raise HTTPException(
+                status_code=400,
+                detail="Ping target must be an IP currently correlated with the selected port.",
+            )
+        try:
+            return run_ping(target_ip)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise HTTPException(status_code=500, detail=f"Ping test failed: {exc}") from exc
 
     @app.get("/search")
     def search(q: str = ""):
