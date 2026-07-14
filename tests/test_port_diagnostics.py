@@ -4,7 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from network_ai_mvp.port_diagnostics import build_port_connection_diagnostic, ping_target
+from network_ai_mvp.port_diagnostics import (
+    build_port_connection_diagnostic,
+    build_recent_link_diagnostic,
+    ping_target,
+)
 
 
 class PortConnectionDiagnosticTests(unittest.TestCase):
@@ -60,6 +64,55 @@ class PortConnectionDiagnosticTests(unittest.TestCase):
             self.assertEqual([item["status"] for item in payload["history"]], ["notconnect", "connected"])
             self.assertEqual(len(payload["link_events"]), 1)
             self.assertEqual(payload["last_link_event"]["timestamp"], "2026-07-14T11:39:03+09:00")
+            self.assertEqual(payload["diagnostic_window"]["minutes"], 10)
+
+    def test_limits_link_diagnostic_to_latest_ten_minutes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            observations = root / "observations" / "cisco-backbone"
+            raw = root / "raw" / "cisco-backbone"
+            observations.mkdir(parents=True)
+            raw.mkdir(parents=True)
+            observation = {
+                "timestamp": "2026-07-14T02:47:41Z",
+                "purpose": "port-endpoints",
+                "ports": [
+                    {
+                        "interface": "Gi3/15",
+                        "status": "connected",
+                        "vlan": "1",
+                        "speed": "a-1000",
+                        "duplex": "a-full",
+                    }
+                ],
+            }
+            (observations / "latest.json").write_text(json.dumps(observation), encoding="utf-8")
+            stdout = "\n".join(
+                (
+                    "Jul 14 2026 11:37:00 KST: %LINK-3-UPDOWN: Interface GigabitEthernet3/16, changed state to down",
+                    "Jul 14 2026 11:39:03 KST: %LINK-3-UPDOWN: Interface GigabitEthernet3/15, changed state to up",
+                    "Jul 14 2026 11:39:04 KST: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet3/15, changed state to up",
+                )
+            )
+            (raw / "latest.json").write_text(
+                json.dumps({"timestamp": "2026-07-14T02:48:29Z", "stdout": stdout}),
+                encoding="utf-8",
+            )
+
+            payload = build_port_connection_diagnostic(
+                root,
+                device_id="cisco-backbone",
+                interface="Gi3/15",
+            )
+            recent = build_recent_link_diagnostic(root, device_id="cisco-backbone")
+
+            self.assertEqual(len(payload["link_events"]), 2)
+            self.assertEqual(payload["event_sequence"]["delay_seconds"], 1)
+            self.assertEqual(payload["other_port_event_count"], 0)
+            self.assertIn("10-minute", payload["other_port_assessment"])
+            self.assertEqual(payload["diagnostic_window"]["start"], "2026-07-14T02:38:29+00:00")
+            self.assertTrue(recent["data_available"])
+            self.assertEqual(recent["interface"], "Gi3/15")
 
     def test_ping_parses_successful_replies(self) -> None:
         def fake_runner(command, **kwargs):

@@ -16,7 +16,7 @@ from .inventory import InventoryError, get_device, load_devices
 from .models import CommandPlan, Device
 from .neighbors import get_neighbors_for_device
 from .observations import find_latest_port, read_latest_observation, read_latest_port_observation
-from .port_diagnostics import build_port_connection_diagnostic, ping_target
+from .port_diagnostics import build_port_connection_diagnostic, build_recent_link_diagnostic, ping_target
 from .policy import CommandPolicyError, allowed_purposes, build_command_plan
 from .search import search_network_state
 from .services.collection import public_command_plan, public_device, public_job_snapshot
@@ -33,7 +33,9 @@ RUNTIME_ROOT = Path(
 DEFAULT_INVENTORY = PROJECT_ROOT / "inventory" / "devices.csv"
 DEFAULT_BACKBONE_NEIGHBORS = PROJECT_ROOT / "inventory" / "backbone_neighbors.json"
 DEFAULT_AUDIT_LOG = RUNTIME_ROOT / "logs" / "collection_audit.jsonl"
-DEFAULT_DATA_DIR = RUNTIME_ROOT / "data"
+# Packaged observations are read-only reference snapshots in Vercel. Observation
+# readers are side-effect free, so the deployed data can be inspected safely.
+DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_COLLECTOR_REGISTRY = CollectorRegistry((PowerShellTelnetReadOnlyExecutor(),))
 
@@ -265,7 +267,7 @@ def create_app(
         }
 
     @app.get("/devices/{device_id}/port-connection-diagnostic")
-    def port_connection_diagnostic(device_id: str, interface: str):
+    def port_connection_diagnostic(device_id: str, interface: str, window_minutes: int = 10):
         try:
             get_device(load_devices(inventory_path), device_id)
         except InventoryError as exc:
@@ -274,6 +276,19 @@ def create_app(
             data_dir,
             device_id=device_id,
             interface=interface,
+            window_minutes=window_minutes,
+        )
+
+    @app.get("/devices/{device_id}/link-diagnostics/recent")
+    def recent_link_diagnostic(device_id: str, window_minutes: int = 10):
+        try:
+            get_device(load_devices(inventory_path), device_id)
+        except InventoryError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return build_recent_link_diagnostic(
+            data_dir,
+            device_id=device_id,
+            window_minutes=window_minutes,
         )
 
     @app.post("/devices/{device_id}/port-connection-diagnostic/ping")

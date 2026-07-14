@@ -633,6 +633,9 @@ async function loadCommandPlan({ requestId = state.selectionRequestId, deviceId 
     renderCommandPlan(state.latestPlan);
     renderCommandPreview(state.latestPlan, { action: "collect" });
     setPreviewStatus(`Preview ready: ${plan.commands.length} allowlisted read-only command(s).`);
+    if (purpose === "link-diagnostics") {
+      await loadRecentLinkDiagnostic({ requestId, deviceId, windowMinutes: 10 });
+    }
     return plan;
   } catch (error) {
     if (requestId === state.selectionRequestId && state.selectedDevice?.device_id === deviceId) {
@@ -1369,6 +1372,59 @@ async function loadPortConnectionDiagnostic(port) {
   renderConnectionDiagnostic(payload);
 }
 
+async function loadRecentLinkDiagnostic({
+  requestId = state.selectionRequestId,
+  deviceId = state.selectedDevice?.device_id,
+  windowMinutes = 10,
+} = {}) {
+  if (!deviceId) {
+    return;
+  }
+  renderConnectionDiagnostic({ loading: true, interface: "recent link event" });
+  const payload = await api(
+    `/devices/${encodeURIComponent(deviceId)}/link-diagnostics/recent?window_minutes=${encodeURIComponent(windowMinutes)}`,
+  );
+  if (requestId !== state.selectionRequestId || state.selectedDevice?.device_id !== deviceId) {
+    return;
+  }
+  if (payload.data_available && payload.port) {
+    renderPortDetail(payload.port);
+  }
+  renderConnectionDiagnostic(payload);
+  renderSummary(
+    payload.data_available
+      ? `${payload.interface} recent ${windowMinutes}-minute link diagnostic loaded.`
+      : payload.message,
+    payload.data_available ? "ok" : "warn",
+  );
+  activateDetailTab("health");
+}
+
+function displayLinkSpeed(value) {
+  const normalized = String(value || "").toLowerCase().replace(/^a-/, "");
+  if (normalized === "1000" || normalized === "1g") {
+    return "1Gbps";
+  }
+  if (normalized === "10000" || normalized === "10g") {
+    return "10Gbps";
+  }
+  if (/^\d+$/.test(normalized)) {
+    return `${Number(normalized)}Mbps`;
+  }
+  return text(value);
+}
+
+function displayLinkDuplex(value) {
+  const normalized = String(value || "").toLowerCase().replace(/^a-/, "");
+  return normalized === "full" ? "Full" : normalized === "half" ? "Half" : text(value);
+}
+
+function displayConnectionState(port) {
+  const status = String(port.status || "unknown");
+  const statusLabel = `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
+  return `${statusLabel} · ${displayLinkSpeed(port.speed)} ${displayLinkDuplex(port.duplex)} · VLAN ${text(port.vlan)}`;
+}
+
 function renderConnectionDiagnostic(payload) {
   if (!nodes.portConnectionDiagnostic) {
     return;
@@ -1415,14 +1471,21 @@ function renderConnectionDiagnostic(payload) {
   facts.className = "facts compact-facts";
   const lastEvent = payload.last_link_event;
   const history = Array.isArray(payload.history) ? payload.history : [];
+  const window = payload.diagnostic_window || {};
+  const sequence = payload.event_sequence;
   const rows = [
-    ["Current State", `${text(port.status)} · ${text(port.speed)} / ${text(port.duplex)}`],
+    ["Diagnostic Window", `${window.minutes || 10} minutes · ${formatObservedAt(window.start)} - ${formatObservedAt(window.end)}`],
+    ["Current State", displayConnectionState(port)],
+    ["Event Sequence", sequence
+      ? `Physical Link Up → ${sequence.delay_seconds} second(s) later Line Protocol Up`
+      : "No complete Physical Link/Line Protocol Up sequence in this window"],
     ["VLAN / Mode", `${text(port.vlan)} / ${portMode(port)}`],
     ["Endpoint IP", listText(payload.endpoint_ips)],
     ["Endpoint MAC", listText(payload.endpoint_macs)],
     ["Port Errors", payload.total_errors || 0],
     ["Last Link Event", lastEvent ? `${formatObservedAt(lastEvent.timestamp)} · ${lastEvent.event.toUpperCase()} ${lastEvent.state.toUpperCase()}` : "No stored LINK/LINEPROTO event"],
     ["State History", history.length ? history.map((item) => `${formatObservedAt(item.timestamp)} ${item.status}`).join(" → ") : "No stored state transition"],
+    ["Other Port Events", payload.other_port_assessment],
     ["Assessment", payload.conclusion],
   ];
   for (const [label, value] of rows) {

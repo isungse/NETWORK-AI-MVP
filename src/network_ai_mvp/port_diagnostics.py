@@ -20,6 +20,7 @@ LINK_EVENT_RE = re.compile(
     r"(?:Line protocol on )?Interface\s+(?P<interface>[^,]+),\s+changed state to\s+(?P<state>\w+)",
     re.MULTILINE,
 )
+DIAGNOSTIC_WINDOW_MINUTES = 10
 
 
 def build_port_connection_diagnostic(
@@ -27,6 +28,7 @@ def build_port_connection_diagnostic(
     *,
     device_id: str,
     interface: str,
+    window_minutes: int = DIAGNOSTIC_WINDOW_MINUTES,
 ) -> dict[str, Any]:
     port = find_latest_port(base_dir, device_id, interface)
     if not port:
@@ -41,7 +43,27 @@ def build_port_connection_diagnostic(
         }
 
     history = _read_port_history(base_dir, device_id, interface)
-    link_events = _read_link_events(base_dir, device_id, interface)
+    all_link_events, observation_time = _read_link_event_context(base_dir, device_id)
+    target = short_interface_name(interface).lower()
+    window_minutes = max(1, min(int(window_minutes), 60))
+    window_end = observation_time or _latest_event_time(all_link_events)
+    window_start = window_end - timedelta(minutes=window_minutes) if window_end else None
+    recent_events = [
+        event
+        for event in all_link_events
+        if _event_in_window(event, window_start=window_start, window_end=window_end)
+    ]
+    link_events = [
+        event
+        for event in recent_events
+        if short_interface_name(str(event.get("interface") or "")).lower() == target
+    ]
+    other_port_events = [
+        event
+        for event in recent_events
+        if short_interface_name(str(event.get("interface") or "")).lower() != target
+    ]
+    event_sequence = _link_up_sequence(link_events)
     status = str(port.get("status") or "unknown").lower()
     endpoint_ips = list(port.get("endpoint_ips") or [])
     endpoint_macs = list(port.get("endpoint_macs") or [])
@@ -72,8 +94,56 @@ def build_port_connection_diagnostic(
         "history": history[-20:],
         "link_events": link_events[-20:],
         "last_link_event": link_events[-1] if link_events else None,
+        "event_sequence": event_sequence,
+        "diagnostic_window": {
+            "minutes": window_minutes,
+            "start": window_start.isoformat() if window_start else None,
+            "end": window_end.isoformat() if window_end else None,
+        },
+        "other_port_events": other_port_events[-20:],
+        "other_port_event_count": len(other_port_events),
+        "other_port_assessment": (
+            f"No other port LINK/LINEPROTO events were observed in the latest {window_minutes}-minute window."
+            if not other_port_events
+            else f"{len(other_port_events)} LINK/LINEPROTO event(s) on other ports were observed in the latest {window_minutes}-minute window."
+        ),
         "ping_available": bool(endpoint_ips),
     }
+
+
+def build_recent_link_diagnostic(
+    base_dir: str | Path,
+    *,
+    device_id: str,
+    window_minutes: int = DIAGNOSTIC_WINDOW_MINUTES,
+) -> dict[str, Any]:
+    window_minutes = max(1, min(int(window_minutes), 60))
+    all_link_events, observation_time = _read_link_event_context(base_dir, device_id)
+    window_end = observation_time or _latest_event_time(all_link_events)
+    window_start = window_end - timedelta(minutes=window_minutes) if window_end else None
+    recent_events = [
+        event
+        for event in all_link_events
+        if _event_in_window(event, window_start=window_start, window_end=window_end)
+    ]
+    if not recent_events:
+        return {
+            "data_available": False,
+            "device_id": device_id,
+            "interface": None,
+            "message": f"No LINK/LINEPROTO event was observed in the latest {window_minutes}-minute window.",
+            "diagnostic_window": {
+                "minutes": window_minutes,
+                "start": window_start.isoformat() if window_start else None,
+                "end": window_end.isoformat() if window_end else None,
+            },
+        }
+    return build_port_connection_diagnostic(
+        base_dir,
+        device_id=device_id,
+        interface=str(recent_events[-1]["interface"]),
+        window_minutes=window_minutes,
+    )
 
 
 def ping_target(
@@ -159,22 +229,26 @@ def _read_port_history(base_dir: str | Path, device_id: str, interface: str) -> 
     return history
 
 
-def _read_link_events(base_dir: str | Path, device_id: str, interface: str) -> list[dict[str, Any]]:
+def _read_link_event_context(
+    base_dir: str | Path,
+    device_id: str,
+) -> tuple[list[dict[str, Any]], datetime | None]:
     raw_dir = Path(base_dir).resolve() / "raw" / device_id
-    target = short_interface_name(interface).lower()
-    unique: dict[tuple[str, str, str], dict[str, Any]] = {}
+    unique: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    latest_observation_time = None
     if not raw_dir.exists():
-        return []
+        return [], None
 
     for path in sorted(raw_dir.glob("*.json")):
         payload = _read_json(path)
         if not payload:
             continue
+        payload_time = _parse_iso_datetime(payload.get("timestamp"))
+        if payload_time and (latest_observation_time is None or payload_time > latest_observation_time):
+            latest_observation_time = payload_time
         stdout = str(payload.get("stdout") or "")
         for match in LINK_EVENT_RE.finditer(stdout):
             event_interface = short_interface_name(match.group("interface").strip())
-            if event_interface.lower() != target:
-                continue
             timestamp = _event_timestamp(match)
             event = {
                 "timestamp": timestamp,
@@ -183,8 +257,59 @@ def _read_link_events(base_dir: str | Path, device_id: str, interface: str) -> l
                 "state": match.group("state").lower(),
                 "message": match.group(0).strip(),
             }
-            unique[(timestamp, event["event"], event["state"])] = event
-    return sorted(unique.values(), key=lambda item: item["timestamp"])
+            unique[(timestamp, event_interface.lower(), event["event"], event["state"])] = event
+    return sorted(unique.values(), key=lambda item: item["timestamp"]), latest_observation_time
+
+
+def _latest_event_time(events: list[dict[str, Any]]) -> datetime | None:
+    values = [_parse_iso_datetime(event.get("timestamp")) for event in events]
+    return max((value for value in values if value is not None), default=None)
+
+
+def _event_in_window(
+    event: dict[str, Any],
+    *,
+    window_start: datetime | None,
+    window_end: datetime | None,
+) -> bool:
+    timestamp = _parse_iso_datetime(event.get("timestamp"))
+    if timestamp is None or window_start is None or window_end is None:
+        return False
+    return window_start <= timestamp <= window_end
+
+
+def _link_up_sequence(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for physical in reversed(events):
+        if physical.get("event") != "link" or physical.get("state") != "up":
+            continue
+        physical_time = _parse_iso_datetime(physical.get("timestamp"))
+        if physical_time is None:
+            continue
+        for protocol in events:
+            if protocol.get("event") != "lineproto" or protocol.get("state") != "up":
+                continue
+            protocol_time = _parse_iso_datetime(protocol.get("timestamp"))
+            if protocol_time is None or protocol_time < physical_time:
+                continue
+            delay_seconds = int((protocol_time - physical_time).total_seconds())
+            if delay_seconds <= 10:
+                return {
+                    "physical_link_at": physical.get("timestamp"),
+                    "line_protocol_at": protocol.get("timestamp"),
+                    "delay_seconds": delay_seconds,
+                    "summary": f"Physical link Up -> Line Protocol Up after {delay_seconds} second(s).",
+                }
+    return None
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _event_timestamp(match: re.Match[str]) -> str:

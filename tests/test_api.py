@@ -443,6 +443,8 @@ class ApiTests(unittest.TestCase):
             "Internet  172.16.1.31  0  9009.d096.cbc5  ARPA  Vlan1\n"
             "Jul 14 2026 11:39:03 KST: %LINK-3-UPDOWN: "
             "Interface GigabitEthernet3/15, changed state to up\n"
+            "Jul 14 2026 11:39:04 KST: %LINEPROTO-5-UPDOWN: "
+            "Line protocol on Interface GigabitEthernet3/15, changed state to up\n"
         )
         store_collection_observation(
             self.data_dir,
@@ -485,6 +487,7 @@ class ApiTests(unittest.TestCase):
             "/devices/cisco-backbone/port-connection-diagnostic",
             params={"interface": "Gi3/15"},
         )
+        recent = client.get("/devices/cisco-backbone/link-diagnostics/recent")
         ping = client.post(
             "/devices/cisco-backbone/port-connection-diagnostic/ping",
             params={"interface": "Gi3/15", "target_ip": "172.16.1.31"},
@@ -497,6 +500,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(diagnostic.status_code, 200)
         self.assertEqual(diagnostic.json()["port"]["vlan"], "1")
         self.assertEqual(diagnostic.json()["last_link_event"]["state"], "up")
+        self.assertEqual(diagnostic.json()["event_sequence"]["delay_seconds"], 1)
+        self.assertEqual(diagnostic.json()["diagnostic_window"]["minutes"], 10)
+        self.assertEqual(recent.status_code, 200)
+        self.assertEqual(recent.json()["interface"], "Gi3/15")
         self.assertEqual(ping.status_code, 200)
         self.assertTrue(ping.json()["success"])
         self.assertEqual(ping_calls, ["172.16.1.31"])
