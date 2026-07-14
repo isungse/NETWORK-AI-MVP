@@ -11,3 +11,6 @@ logs/
 logs/*.jsonl
 data/
 src/*.egg-info/
+
+.vercel
+.env*
