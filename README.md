@@ -106,3 +106,12 @@ $env:NETWORK_AI_CREDENTIAL_ARISTA_KCL="$env:USERPROFILE\arista_kcl.cred.xml"
 Collection attempts are appended to `logs/collection_audit.jsonl`. Audit records include device metadata, purpose, allowlisted commands, success/failure, return code, and an error summary, but not passwords.
 
 Telnet support is temporary and insecure. Prefer SSH or an API transport before using this outside the local MVP phase.
+
+## Vercel Deployment
+
+The production read-only site is [network-ai-mvp.vercel.app](https://network-ai-mvp.vercel.app).
+
+- Deployment and verification procedure: [`.codex/rules/workflow.md`](.codex/rules/workflow.md)
+- Runtime roles and private-network boundary: [`.codex/rules/architecture.md`](.codex/rules/architecture.md)
+
+Do not duplicate deployment commands, Firewall addresses, or transient deployment identifiers in this README.

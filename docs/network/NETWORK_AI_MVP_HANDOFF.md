@@ -220,6 +220,15 @@ Device buffer logs alone cannot prove long-term absence of access or manipulatio
 
 No 2F Et11 error-counter issue was observed at collection time.
 
+## Deployment Guidance
+
+The Vercel deployment is a read-only reference UI. Canonical guidance is maintained in:
+
+- [Deployment architecture](../../.codex/rules/architecture.md)
+- [Git and Vercel workflow](../../.codex/rules/workflow.md)
+
+Do not add deployment identifiers, Firewall addresses, verification transcripts, or session recovery notes to this handoff document.
+
 Future LLM direction:
 
 - LLM may be used only for controlled intent extraction and result summarization.
