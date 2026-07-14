@@ -721,7 +721,7 @@ function renderCommandPreview(plan, { action = "collect", port = state.selectedP
     plan.read_only !== false,
   );
   if (nodes.collect) {
-    nodes.collect.textContent = action === "check" ? "Run CHECK" : "Run Diagnostic";
+    nodes.collect.textContent = action === "check" ? "Run CHECK" : "진단 실행";
     nodes.collect.disabled = !state.previewReady;
   }
   if (!nodes.commandPreview) {
