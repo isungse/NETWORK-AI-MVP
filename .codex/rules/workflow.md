@@ -72,10 +72,11 @@ Until Git-triggered production deployment is configured and verified, use the cl
 For this project, a user request to commit and push validated application or UI changes also authorizes production synchronization unless the user explicitly requests preview-only or no deployment.
 
 1. Push the reviewed commit and wait for the matching Vercel Git Preview deployment to reach `READY`.
-2. Verify that the Preview deployment Git SHA exactly matches the pushed `HEAD` and that `/health` and the changed user flow pass.
-3. Promote that exact Preview deployment to Production so the production artifact is identical to the reviewed Git commit.
-4. Confirm that the production alias resolves to the promoted deployment and re-run the production verification gate.
-5. If no matching Git Preview exists, use the clean-worktree CLI procedure below; never deploy the primary dirty working tree.
+2. Verify that the Preview deployment Git SHA exactly matches the pushed `HEAD` and that `/health`, the changed user flow, and any required reference-data endpoint match the reviewed local state.
+3. Promote that exact Preview deployment to Production only when the Git artifact contains every required reviewed reference snapshot.
+4. When required reference data is intentionally excluded from Git under `data/`, do not promote the snapshot-less Preview. Use the clean-worktree CLI procedure below after the required sensitive-data scan and copy only the reviewed snapshot into the temporary artifact.
+5. Confirm that the production alias resolves to the released deployment and re-run the production verification gate.
+6. If no matching Git Preview exists, use the clean-worktree CLI procedure below; never deploy the primary dirty working tree.
 
 A feature-branch deployment marked `Preview` is not a completed production release. Keep `main` as the Vercel production branch for merge-driven automatic releases; use explicit Preview promotion for a user-approved release from another branch instead of changing the project production branch to a temporary feature branch.
 
