@@ -1619,7 +1619,26 @@ async function loadDashboard() {
   nodes.topologyMap?.replaceChildren();
   nodes.alarmFeed?.replaceChildren();
 
-  const topology = await api("/topology");
+  let topology;
+  try {
+    topology = await api("/topology");
+  } catch (error) {
+    state.topologyEdges = [];
+    state.topologySummary = { devices: state.devices.length, edges: 0 };
+    state.dashboardDevices = state.devices.map((device) => ({
+      device,
+      findings: [],
+      severity: "info",
+      snapshotAvailable: false,
+      snapshotMessage: "Live topology is unavailable; inventory data is still shown.",
+      loadError: error.message,
+    }));
+    renderDashboard();
+    if (nodes.dashboardUpdated) {
+      nodes.dashboardUpdated.textContent = `Inventory loaded (${state.devices.length} devices). Topology unavailable: ${error.message}`;
+    }
+    return;
+  }
   state.topologyEdges = Array.isArray(topology.edges) ? topology.edges : [];
   state.topologySummary = topology.summary || {};
   state.dashboardDevices = (topology.nodes || []).map((device) => ({
@@ -2627,11 +2646,25 @@ function cssEscape(value) {
   return String(value).replace(/["\\]/g, "\\$&");
 }
 
-function startTopologyStream() {
-  if (state.topologyStreamStarted || !window.EventSource) {
+function startTopologyUpdates(transport = "sse") {
+  if (state.topologyStreamStarted) {
     return;
   }
   state.topologyStreamStarted = true;
+
+  if (transport !== "sse" || !window.EventSource) {
+    state.topologyStreamStale = true;
+    window.setInterval(async () => {
+      try {
+        const payload = await api("/monitoring/latest");
+        applyTopologyMonitoringPatch(payload);
+      } catch {
+        state.topologyStreamStale = true;
+      }
+    }, 15000);
+    return;
+  }
+
   const events = new EventSource("/events/monitoring");
   events.onopen = () => {
     state.topologyStreamStale = false;
@@ -3461,9 +3494,20 @@ window.addEventListener("resize", () => {
   renderTopologyMap();
 });
 
-Promise.all([api("/health"), loadDevices(), loadAudit()])
-  .then(([health]) => {
-    setStatus(`API connected. ${health.mode}.`, true);
-    startTopologyStream();
-  })
-  .catch((error) => setStatus(error.message, false));
+Promise.allSettled([api("/health"), loadDevices(), loadAudit()]).then(
+  ([healthResult, devicesResult, auditResult]) => {
+    if (healthResult.status === "rejected") {
+      setStatus(healthResult.reason.message, false);
+      return;
+    }
+
+    const failedSections = [devicesResult, auditResult].filter((result) => result.status === "rejected");
+    setStatus(
+      failedSections.length
+        ? `API connected. ${failedSections.length} section(s) could not be loaded.`
+        : `API connected. ${healthResult.value.mode}.`,
+      failedSections.length === 0,
+    );
+    startTopologyUpdates(healthResult.value.monitoring_transport);
+  },
+);

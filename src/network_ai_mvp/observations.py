@@ -231,9 +231,9 @@ def _write_json(path: Path, payload: Any) -> None:
 
 
 def _safe_root(base_dir: str | Path) -> Path:
-    root = Path(base_dir).resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    # Read paths must stay side-effect free. Vercel mounts the deployed source
+    # at /var/task as read-only, while write helpers create their own parents.
+    return Path(base_dir).resolve()
 
 
 def _safe_name(value: str) -> str:

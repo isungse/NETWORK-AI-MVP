@@ -108,7 +108,10 @@ class ApiTests(unittest.TestCase):
         device = self.client.get("/devices/arista-10g-core")
 
         self.assertEqual(health.status_code, 200)
-        self.assertEqual(health.json(), {"status": "ok", "mode": "read-only"})
+        self.assertEqual(
+            health.json(),
+            {"status": "ok", "mode": "read-only", "monitoring_transport": "sse"},
+        )
         self.assertEqual(index.status_code, 200)
         self.assertIn("Network AI MVP", index.text)
         self.assertNotIn("Ask Plan", index.text)
@@ -208,6 +211,23 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(any(edge["target_device_id"] == "arista-b1f-1" for edge in arista_edges))
         self.assertTrue(any(edge["target_device_id"] == "arista-4f-10g-1" for edge in arista_edges))
         self.assertFalse(any(edge["target_device_id"] == "arista-3f" for edge in arista_edges))
+
+    def test_read_only_state_endpoints_do_not_create_missing_data_directory(self) -> None:
+        self.assertFalse(self.data_dir.exists())
+
+        topology = self.client.get("/topology")
+        ports = self.client.get("/devices/cisco-backbone/ports/latest")
+        connection = self.client.get(
+            "/devices/cisco-backbone/port-connection-diagnostic",
+            params={"interface": "Gi3/15"},
+        )
+
+        self.assertEqual(topology.status_code, 200)
+        self.assertEqual(ports.status_code, 200)
+        self.assertEqual(connection.status_code, 200)
+        self.assertFalse(ports.json()["data_available"])
+        self.assertFalse(connection.json()["data_available"])
+        self.assertFalse(self.data_dir.exists())
 
     def test_topology_endpoint_includes_live_neighbor_snapshot_edges(self) -> None:
         observation_dir = self.data_dir / "observations" / "arista-10g-core"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+import os
 from pathlib import Path
 import subprocess
 from typing import Callable
@@ -23,10 +24,16 @@ from .services.collection_workflow import CollectionWorkflow, WorkflowError
 from .services.monitoring import MonitoringHub
 from .services.topology import build_topology
 
-DEFAULT_INVENTORY = Path(__file__).resolve().parents[2] / "inventory" / "devices.csv"
-DEFAULT_BACKBONE_NEIGHBORS = Path(__file__).resolve().parents[2] / "inventory" / "backbone_neighbors.json"
-DEFAULT_AUDIT_LOG = Path(__file__).resolve().parents[2] / "logs" / "collection_audit.jsonl"
-DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+IS_VERCEL = bool(os.environ.get("VERCEL"))
+RUNTIME_ROOT = Path(
+    os.environ.get("NETWORK_AI_RUNTIME_DIR")
+    or ("/tmp/network-ai-mvp" if IS_VERCEL else PROJECT_ROOT)
+)
+DEFAULT_INVENTORY = PROJECT_ROOT / "inventory" / "devices.csv"
+DEFAULT_BACKBONE_NEIGHBORS = PROJECT_ROOT / "inventory" / "backbone_neighbors.json"
+DEFAULT_AUDIT_LOG = RUNTIME_ROOT / "logs" / "collection_audit.jsonl"
+DEFAULT_DATA_DIR = RUNTIME_ROOT / "data"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_COLLECTOR_REGISTRY = CollectorRegistry((PowerShellTelnetReadOnlyExecutor(),))
 
@@ -89,7 +96,12 @@ def create_app(
     def monitoring_events(): return StreamingResponse(monitoring_hub.event_stream(), media_type="text/event-stream")
 
     @app.get("/health")
-    def health() -> dict[str, str]: return {"status": "ok", "mode": "read-only"}
+    def health() -> dict[str, str]:
+        return {
+            "status": "ok",
+            "mode": "read-only",
+            "monitoring_transport": "poll" if IS_VERCEL else "sse",
+        }
 
     @app.get("/devices")
     def devices():

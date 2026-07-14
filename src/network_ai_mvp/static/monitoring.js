@@ -12,9 +12,15 @@ async function loadLatestMonitoringResult() {
   renderMonitoringResult(payload);
 }
 
-function subscribeMonitoringEvents() {
-  if (!window.EventSource) {
-    nodes.status.textContent = "Server events are not supported by this browser.";
+function subscribeMonitoringEvents(transport = "sse") {
+  if (transport !== "sse" || !window.EventSource) {
+    nodes.status.textContent = "Monitoring snapshot polling is active.";
+    window.setInterval(() => {
+      loadLatestMonitoringResult().catch((error) => {
+        nodes.status.textContent = "Monitoring snapshot could not be refreshed.";
+        nodes.meta.textContent = error.message;
+      });
+    }, 15000);
     return;
   }
 
@@ -66,8 +72,12 @@ function formatMeta(payload) {
   return parts.length ? parts.join(" | ") : "No metadata";
 }
 
-loadLatestMonitoringResult().catch((error) => {
-  nodes.status.textContent = "Monitoring snapshot could not be loaded.";
-  nodes.meta.textContent = error.message;
-});
-subscribeMonitoringEvents();
+Promise.all([
+  loadLatestMonitoringResult(),
+  fetch("/health", { headers: { Accept: "application/json" } }).then((response) => response.json()),
+])
+  .then(([, health]) => subscribeMonitoringEvents(health.monitoring_transport))
+  .catch((error) => {
+    nodes.status.textContent = "Monitoring snapshot could not be loaded.";
+    nodes.meta.textContent = error.message;
+  });

@@ -31,6 +31,14 @@ Address         Age (sec)  Hardware Addr   Interface
 
 
 class ObservationStoreTests(unittest.TestCase):
+    def test_reading_missing_store_does_not_create_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing_root = Path(temp_dir) / "missing-data"
+
+            self.assertIsNone(read_latest_observation(missing_root, "cisco-backbone"))
+            self.assertIsNone(read_latest_port_observation(missing_root, "cisco-backbone"))
+            self.assertFalse(missing_root.exists())
+
     def test_stores_redacted_raw_and_latest_parsed_ports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             device = get_device(load_devices("inventory/devices.csv"), "arista-2f-outpatient")
