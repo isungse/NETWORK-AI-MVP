@@ -27,6 +27,16 @@ Get-Content .vercel\project.json
 
 Confirm that the Vercel link points to the intended `network-ai-mvp` project before deploying.
 
+## Connected Vercel App
+
+The ChatGPT/Codex Vercel app and the Vercel CLI use separate authentication state. A successful `vercel whoami` check does not prove that connector tools can access the project.
+
+- Authorize the connected Vercel app for the `isungse's projects` team and explicitly select the `network-ai-mvp` project.
+- Prefer project-scoped access. Do not grant access to every team project unless the requested workflow requires it.
+- If connector team results are empty, or project and deployment reads return `403` or `404`, open **ChatGPT Settings → Plugins → Vercel → Plugin actions → Reconnect** and repeat the Vercel OAuth flow.
+- Treat reconnection as complete only after connector calls can list the intended team and project, read the `network-ai-mvp` project, and list its deployments.
+- Do not record OAuth tokens, account email addresses, transient authorization URLs, or connector session output in repository documentation.
+
 ## Validation Gate
 
 Run checks appropriate to the changed scope. For application changes, the minimum gate is:
