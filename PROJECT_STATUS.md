@@ -24,6 +24,7 @@ Provide a read-only network operations console that inventories devices, runs al
 - Vercel cannot directly collect from private company-network device addresses.
 - Local collection results are not automatically synchronized to Vercel.
 - Production reference snapshots are not a live feed.
+- Confirmed physical faceplate metadata is model-specific; devices without explicit module evidence use logical port ordering and must not imply an unverified chassis layout.
 - Collection is manual; there is no persistent scheduler or polling service.
 - The active collector uses Telnet and should be migrated to a secure transport.
 - The API does not yet provide complete operator authentication and authorization for shared on-premises use.
