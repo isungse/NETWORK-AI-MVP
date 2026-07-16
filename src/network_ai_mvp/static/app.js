@@ -1,3 +1,33 @@
+const CONFIRMED_CHASSIS_LAYOUTS = Object.freeze({
+  "cisco-backbone": {
+    chassisType: "WS-C4503-E",
+    source: "Operator-provided show module reference",
+    modules: [
+      {
+        slot: "1",
+        portCount: 4,
+        cardType: "Sup 7-E 10GE (SFP+), 1000BaseX (SFP)",
+        model: "WS-X45-SUP7-E",
+        serial: "CAT1834L1W7",
+      },
+      {
+        slot: "2",
+        portCount: 24,
+        cardType: "1000BaseX SFP",
+        model: "WS-X4724-SFP-E",
+        serial: "CAT1832L3HR",
+      },
+      {
+        slot: "3",
+        portCount: 48,
+        cardType: "10/100/1000BaseT EEE (RJ45)",
+        model: "WS-X4748-RJ45-E",
+        serial: "CAT1648L0AN",
+      },
+    ],
+  },
+});
+
 const state = {
   devices: [],
   dashboardDevices: [],
@@ -1268,7 +1298,9 @@ function renderSwitchFrontPanel() {
   hostname.textContent = state.selectedDevice?.hostname || state.selectedDevice?.device_id || "Switch";
   hostname.title = hostname.textContent;
   const platform = document.createElement("span");
-  platform.textContent = [state.selectedDevice?.vendor, state.selectedDevice?.platform].filter(Boolean).join(" · ");
+  platform.textContent = layout.chassis
+    ? `Chassis ${layout.chassis.chassisType} · ${layout.chassis.modules.length} modules`
+    : [state.selectedDevice?.vendor, state.selectedDevice?.platform].filter(Boolean).join(" · ");
   identity.append(hostname, platform);
   chassis.append(portArea, identity);
   scroll.append(chassis);
@@ -1321,6 +1353,18 @@ function isConfirmedHpeReferenceLayout(device, numbers) {
     isCompleteNumberRange(numbers, 1, 28);
 }
 
+function confirmedChassisLayout(device) {
+  const layout = CONFIRMED_CHASSIS_LAYOUTS[String(device?.device_id || "")];
+  if (!layout || String(device?.platform || "").toUpperCase() !== layout.chassisType.toUpperCase()) {
+    return null;
+  }
+  return layout;
+}
+
+function isConfirmedChassisManagementInterface(device, value) {
+  return Boolean(confirmedChassisLayout(device)) && /^Fa1$/i.test(shortInterfaceName(value));
+}
+
 function buildPortBanks(items, size = 12) {
   const banks = new Map();
   for (const item of items) {
@@ -1334,11 +1378,31 @@ function buildPortBanks(items, size = 12) {
   return Array.from(banks.values()).sort((left, right) => left.start - right.start);
 }
 
+function buildChassisModuleBanks(items, portCount) {
+  const banks = [];
+  const bankSize = portCount <= 4 ? portCount : 12;
+  for (let start = 1; start <= portCount; start += bankSize) {
+    const end = Math.min(start + bankSize - 1, portCount);
+    banks.push({
+      label: `Ports ${start}-${end}`,
+      start,
+      end,
+      items: items.filter((item) => item.number >= start && item.number <= end),
+      singleRow: false,
+    });
+  }
+  return banks;
+}
+
 function buildPhysicalPortGroups(ports) {
   const physical = [];
   const logical = [];
   const unclassified = [];
   for (const port of ports) {
+    if (isConfirmedChassisManagementInterface(state.selectedDevice, port.interface)) {
+      logical.push(port);
+      continue;
+    }
     const parsed = parsePhysicalInterface(port.interface);
     if (parsed) {
       physical.push({ ...parsed, port });
@@ -1349,9 +1413,11 @@ function buildPhysicalPortGroups(ports) {
     }
   }
   physical.sort((left, right) => String(left.interface).localeCompare(String(right.interface), undefined, { numeric: true }));
+  const chassis = confirmedChassisLayout(state.selectedDevice);
+  const modulesBySlot = new Map((chassis?.modules || []).map((module) => [module.slot, module]));
   const grouped = new Map();
   for (const item of physical) {
-    const key = `${item.prefix}:${item.slot}`;
+    const key = modulesBySlot.has(item.slot) ? `slot:${item.slot}` : `${item.prefix}:${item.slot}`;
     if (!grouped.has(key)) {
       grouped.set(key, []);
     }
@@ -1361,9 +1427,14 @@ function buildPhysicalPortGroups(ports) {
   let specializedLayout = false;
   for (const [key, items] of grouped) {
     const numbers = items.map((item) => item.number);
+    const module = key.startsWith("slot:") ? modulesBySlot.get(key.slice(5)) : null;
     let banks;
     let label = key.replace(":default", " ports").replace(":", " slot ");
-    if (isConfirmedHpeReferenceLayout(state.selectedDevice, numbers)) {
+    if (module) {
+      specializedLayout = true;
+      banks = buildChassisModuleBanks(items, module.portCount);
+      label = `Slot ${module.slot} · ${module.model}`;
+    } else if (isConfirmedHpeReferenceLayout(state.selectedDevice, numbers)) {
       specializedLayout = true;
       const primary = items.filter((item) => item.number <= 24);
       const additional = items.filter((item) => item.number >= 25);
@@ -1384,15 +1455,24 @@ function buildPhysicalPortGroups(ports) {
     } else {
       banks = buildPortBanks(items, 12);
     }
-    groups.push({ key, label, banks });
+    groups.push({ key, label, banks, module });
   }
+  groups.sort((left, right) => {
+    if (left.module && right.module) {
+      return Number(left.module.slot) - Number(right.module.slot);
+    }
+    return left.key.localeCompare(right.key, undefined, { numeric: true });
+  });
   return {
     groups,
     logical: logical.sort(comparePortInterfaces),
     unclassified: unclassified.sort(comparePortInterfaces),
-    layoutNote: specializedLayout
-      ? "Logical faceplate based on confirmed contiguous port numbering; physical type metadata unavailable."
-      : "Logical port order · physical slot metadata unavailable.",
+    chassis,
+    layoutNote: chassis
+      ? `${chassis.source}. Module identity is reference data; port state is the latest stored observation.`
+      : specializedLayout
+        ? "Logical faceplate based on confirmed contiguous port numbering; physical type metadata unavailable."
+        : "Logical port order · physical slot metadata unavailable.",
   };
 }
 
@@ -1425,10 +1505,23 @@ function renderPhysicalPortGroup(group) {
     bankNode.append(label);
     banks.append(bankNode);
   }
-  const label = document.createElement("span");
-  label.className = "switch-group-label";
-  label.textContent = group.label;
-  wrapper.append(banks, label);
+  if (group.module) {
+    const header = document.createElement("header");
+    header.className = "switch-module-header";
+    const identity = document.createElement("strong");
+    identity.textContent = `Slot ${group.module.slot} · ${group.module.model}`;
+    const type = document.createElement("span");
+    type.textContent = `${group.module.portCount} ports · ${group.module.cardType}`;
+    const serial = document.createElement("code");
+    serial.textContent = `S/N ${group.module.serial}`;
+    header.append(identity, type, serial);
+    wrapper.append(header, banks);
+  } else {
+    const label = document.createElement("span");
+    label.className = "switch-group-label";
+    label.textContent = group.label;
+    wrapper.append(banks, label);
+  }
   return wrapper;
 }
 

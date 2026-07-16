@@ -122,6 +122,31 @@ const cisco = evaluate(`
 assert.equal(cisco.groups[0].key, "Gi:3");
 assert.deepEqual(Array.from(cisco.groups[0].banks, (bank) => bank.label), ["1-12", "13-24"]);
 
+context.backboneChassisFixture = [
+  ...ports("Te1/", 1, 4),
+  ...ports("Gi2/", 1, 24),
+  ...ports("Gi3/", 1, 48),
+  { interface: "Fa1", status: "connected" },
+  { interface: "Vl1", status: "connected" },
+];
+const backboneChassis = evaluate(`
+  state.selectedDevice = { device_id: "cisco-backbone", vendor: "cisco", platform: "WS-C4503-E" };
+  buildPhysicalPortGroups(backboneChassisFixture);
+`);
+assert.equal(backboneChassis.chassis.chassisType, "WS-C4503-E");
+assert.deepEqual(Array.from(backboneChassis.groups, (group) => group.key), ["slot:1", "slot:2", "slot:3"]);
+assert.deepEqual(Array.from(backboneChassis.groups, (group) => group.module.model), [
+  "WS-X45-SUP7-E",
+  "WS-X4724-SFP-E",
+  "WS-X4748-RJ45-E",
+]);
+assert.deepEqual(Array.from(backboneChassis.groups, (group) => group.module.portCount), [4, 24, 48]);
+assert.equal(backboneChassis.groups[0].banks[0].items.length, 4);
+assert.equal(backboneChassis.groups[1].banks.flatMap((bank) => bank.items).length, 24);
+assert.equal(backboneChassis.groups[2].banks.flatMap((bank) => bank.items).length, 48);
+assert.deepEqual(Array.from(backboneChassis.logical, (port) => port.interface), ["Fa1", "Vl1"]);
+assert.match(backboneChassis.layoutNote, /show module reference/);
+
 context.warningPort = {
   interface: "Et7",
   status: "connected",

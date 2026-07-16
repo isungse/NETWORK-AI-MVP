@@ -2225,6 +2225,30 @@ tr.device-row.selected {
   gap: 5px;
 }
 
+.switch-module-header {
+  display: grid;
+  grid-template-columns: minmax(170px, auto) minmax(220px, 1fr) auto;
+  gap: 8px 12px;
+  align-items: baseline;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+  padding: 0 0 6px;
+}
+
+.switch-module-header strong {
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.switch-module-header span,
+.switch-module-header code {
+  color: #d8d8dc;
+  font-size: 10px;
+}
+
+.switch-module-header code {
+  white-space: nowrap;
+}
+
 .switch-port-banks {
   gap: 14px;
 }
