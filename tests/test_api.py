@@ -379,8 +379,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(ports.status_code, 200)
         self.assertTrue(ports.json()["data_available"])
         self.assertEqual(ports.json()["summary"]["low_speed_connected_ports"], 1)
+        self.assertEqual(ports.json()["ports"][0]["mac_diagnostic"]["count"], 1)
+        self.assertEqual(ports.json()["ports"][0]["mac_diagnostic"]["reason"], "single_mac_learned")
         self.assertEqual(port.status_code, 200)
         self.assertEqual(port.json()["port"]["speed_mbps"], 100)
+        self.assertEqual(port.json()["port"]["mac_diagnostic"]["macs"], ["b42e.9906.7712"])
         self.assertEqual(search.status_code, 200)
         self.assertEqual(search.json()["results"][0]["type"], "port")
 

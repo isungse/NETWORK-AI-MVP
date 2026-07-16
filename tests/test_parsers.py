@@ -60,6 +60,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(by_port["Et6"]["runts"], 1841084)
         self.assertEqual(by_port["Et6"]["endpoint_ips"], ("172.16.22.153",))
         self.assertEqual(by_port["Et6"]["endpoint_macs"], ("b42e.9906.7712",))
+        self.assertTrue(by_port["Et6"]["mac_table_collected"])
         self.assertEqual(by_port["Et29"]["endpoint_macs"], ("5c60.ba3c.725f",))
         self.assertNotIn("ago", by_port)
         self.assertNotIn("show", by_port)

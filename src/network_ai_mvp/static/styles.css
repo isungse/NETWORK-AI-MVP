@@ -1755,6 +1755,37 @@ tr.device-row.selected {
   text-transform: uppercase;
 }
 
+.interface-mac-evidence {
+  border-top: 1px solid var(--subtle);
+  padding: 10px;
+}
+
+.interface-mac-evidence h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.interface-mac-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.interface-mac-list li {
+  border: 1px solid var(--subtle);
+  border-radius: 5px;
+  background: #f8fafc;
+  padding: 5px 7px;
+}
+
+.interface-mac-list code {
+  color: var(--ink);
+  font-size: 11px;
+}
+
 .ping-test-controls {
   display: grid;
   grid-template-columns: minmax(130px, 1fr) auto;

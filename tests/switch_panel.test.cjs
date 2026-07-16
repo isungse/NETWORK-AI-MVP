@@ -143,6 +143,23 @@ assert.equal(evaluate(`
 assert.equal(evaluate(`state.portStatusFilter = "error"; portMatchesFilters(warningPort);`), true);
 assert.equal(evaluate("buildPortAriaLabel(warningPort).includes('PoE')"), false);
 assert.equal(evaluate("buildPortAriaLabel(warningPort).includes('diagnostic warning')"), true);
+context.multiMacPort = {
+  interface: "Et52",
+  status: "connected",
+  source_purpose: "check",
+  endpoint_macs: ["0000.0000.0002", "0000.0000.0001"],
+};
+const multiMacDiagnostic = evaluate("interfaceMacDiagnostic(multiMacPort)");
+assert.equal(multiMacDiagnostic.reason, "multiple_macs_learned");
+assert.equal(multiMacDiagnostic.count, 2);
+assert.deepEqual(Array.from(multiMacDiagnostic.macs), ["0000.0000.0001", "0000.0000.0002"]);
+context.noMacPort = {
+  interface: "Et2",
+  status: "connected",
+  source_purpose: "check",
+  endpoint_macs: [],
+};
+assert.equal(evaluate("interfaceMacDiagnostic(noMacPort).reason"), "no_mac_learned");
 const filteredFaceplate = evaluate("buildPhysicalPortGroups(fortyEightPlus)");
 assert.equal(filteredFaceplate.groups[0].banks.flatMap((bank) => bank.items).length, 52);
 

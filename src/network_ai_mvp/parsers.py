@@ -20,6 +20,7 @@ def parse_collection_ports(
     descriptions = parse_interface_descriptions(sections.get("show interfaces description", ""))
     counters = parse_interface_error_counters(sections.get("show interfaces counters errors", ""))
     mac_entries = parse_mac_address_table(sections.get("show mac address-table", ""))
+    mac_table_collected = "show mac address-table" in sections
     arp_entries = parse_ip_arp(sections.get("show ip arp", ""))
     lldp_neighbors = parse_lldp_neighbors(sections.get("show lldp neighbors", ""))
 
@@ -55,6 +56,7 @@ def parse_collection_ports(
             description=descriptions.get(port, ""),
             endpoint_ips=tuple(sorted(endpoint_ips_by_port.get(port, set()), key=ip_sort_key)),
             endpoint_macs=tuple(sorted(endpoint_macs_by_port.get(port, set()))),
+            mac_table_collected=mac_table_collected,
             neighbor_name=neighbor.get("neighbor_name"),
             neighbor_ip=neighbor.get("neighbor_ip"),
             neighbor_platform=neighbor.get("neighbor_platform"),

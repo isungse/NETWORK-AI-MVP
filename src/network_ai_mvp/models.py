@@ -39,6 +39,7 @@ class PortObservation:
     description: str = ""
     endpoint_ips: tuple[str, ...] = ()
     endpoint_macs: tuple[str, ...] = ()
+    mac_table_collected: bool = False
     neighbor_name: str | None = None
     neighbor_ip: str | None = None
     neighbor_platform: str | None = None

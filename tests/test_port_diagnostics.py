@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from network_ai_mvp.mac_diagnostics import build_interface_mac_diagnostic
 from network_ai_mvp.port_diagnostics import (
     build_port_connection_diagnostic,
     build_recent_link_diagnostic,
@@ -61,6 +62,8 @@ class PortConnectionDiagnosticTests(unittest.TestCase):
             self.assertTrue(payload["data_available"])
             self.assertEqual(payload["severity"], "normal")
             self.assertEqual(payload["endpoint_ips"], ["172.16.1.31"])
+            self.assertEqual(payload["mac_diagnostic"]["reason"], "single_mac_learned")
+            self.assertEqual(payload["mac_diagnostic"]["count"], 1)
             self.assertEqual([item["status"] for item in payload["history"]], ["notconnect", "connected"])
             self.assertEqual(len(payload["link_events"]), 1)
             self.assertEqual(payload["last_link_event"]["timestamp"], "2026-07-14T11:39:03+09:00")
@@ -113,6 +116,36 @@ class PortConnectionDiagnosticTests(unittest.TestCase):
             self.assertEqual(payload["diagnostic_window"]["start"], "2026-07-14T02:38:29+00:00")
             self.assertTrue(recent["data_available"])
             self.assertEqual(recent["interface"], "Gi3/15")
+
+    def test_explains_multiple_empty_and_uncollected_mac_evidence(self) -> None:
+        multiple = build_interface_mac_diagnostic(
+            {
+                "status": "connected",
+                "endpoint_macs": ["0000.0000.0002", "0000.0000.0001"],
+                "source_purpose": "check",
+            }
+        )
+        empty_connected = build_interface_mac_diagnostic(
+            {
+                "status": "connected",
+                "endpoint_macs": [],
+                "source_purpose": "check",
+            }
+        )
+        not_collected = build_interface_mac_diagnostic(
+            {
+                "status": "connected",
+                "endpoint_macs": [],
+                "source_purpose": "interfaces",
+            }
+        )
+
+        self.assertEqual(multiple["reason"], "multiple_macs_learned")
+        self.assertEqual(multiple["macs"], ["0000.0000.0001", "0000.0000.0002"])
+        self.assertEqual(empty_connected["reason"], "no_mac_learned")
+        self.assertTrue(empty_connected["data_available"])
+        self.assertEqual(not_collected["reason"], "mac_table_not_collected")
+        self.assertFalse(not_collected["data_available"])
 
     def test_ping_parses_successful_replies(self) -> None:
         def fake_runner(command, **kwargs):

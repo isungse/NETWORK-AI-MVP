@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .mac_diagnostics import build_interface_mac_diagnostic
 from .observations import find_latest_port
 from .parsers import short_interface_name
 
@@ -67,6 +68,7 @@ def build_port_connection_diagnostic(
     status = str(port.get("status") or "unknown").lower()
     endpoint_ips = list(port.get("endpoint_ips") or [])
     endpoint_macs = list(port.get("endpoint_macs") or [])
+    mac_diagnostic = build_interface_mac_diagnostic(port)
     total_errors = sum(
         int(port.get(key) or 0)
         for key in ("fcs_errors", "align_errors", "symbol_errors", "rx_errors", "runts", "giants", "tx_errors")
@@ -90,6 +92,7 @@ def build_port_connection_diagnostic(
         "port": port,
         "endpoint_ips": endpoint_ips,
         "endpoint_macs": endpoint_macs,
+        "mac_diagnostic": mac_diagnostic,
         "total_errors": total_errors,
         "history": history[-20:],
         "link_events": link_events[-20:],

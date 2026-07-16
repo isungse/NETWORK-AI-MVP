@@ -13,6 +13,7 @@ from .credentials import resolve_credential_path
 from .diagnostics import assess_device_risks, summarize_findings
 from .executor import PowerShellTelnetReadOnlyExecutor
 from .inventory import InventoryError, InventoryRepository
+from .mac_diagnostics import build_interface_mac_diagnostic
 from .models import Device
 from .neighbors import get_neighbors_for_device
 from .observations import find_latest_port, read_latest_observation, read_latest_port_observation
@@ -234,7 +235,11 @@ def create_app(
                 )
             ),
             "summary": observation.get("summary", {}),
-            "ports": observation.get("ports", []),
+            "ports": [
+                {**port, "mac_diagnostic": build_interface_mac_diagnostic(port)}
+                for port in observation.get("ports", [])
+                if isinstance(port, dict)
+            ],
         }
 
     @app.get("/devices/{device_id}/ports/{interface:path}/latest")
@@ -254,7 +259,7 @@ def create_app(
             "device": public_device(device, DEFAULT_COLLECTOR_REGISTRY),
             "interface": port.get("interface"),
             "data_available": True,
-            "port": port,
+            "port": {**port, "mac_diagnostic": build_interface_mac_diagnostic(port)},
         }
 
     @app.get("/devices/{device_id}/port-connection-diagnostic")

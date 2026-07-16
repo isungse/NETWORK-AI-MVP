@@ -12,6 +12,7 @@ Provide a read-only network operations console that inventories devices, runs al
 - Local redacted raw and parsed observation storage.
 - Device dashboard, inventory, topology, Port Matrix, endpoint search, diagnostics, audit, and monitoring views.
 - Port status, VLAN, speed/duplex, error-counter, MAC, ARP, and neighbor correlation.
+- Per-interface MAC diagnostics that distinguish learned MACs, no learned entry, down-port state, and missing MAC-table collection evidence.
 - `link-diagnostics` analysis over the latest 10-minute observation window.
 - Physical LINK Up to Line Protocol Up sequence detection.
 - Current-port and other-port LINK/LINEPROTO event summaries.

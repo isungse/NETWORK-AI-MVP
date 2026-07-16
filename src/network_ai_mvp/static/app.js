@@ -1685,6 +1685,7 @@ function looksLikePortInterface(value) {
 }
 
 function portTooltip(port) {
+  const macDiagnostic = interfaceMacDiagnostic(port);
   return [
     `Port: ${text(port.interface)}`,
     `Status: ${text(port.status)}`,
@@ -1695,8 +1696,71 @@ function portTooltip(port) {
     `Last Change: ${text(port.source_timestamp)}`,
     `CRC/FCS Errors: ${port.fcs_errors || 0}`,
     `Input/Rx Errors: ${port.rx_errors || 0}`,
-    `Connected MAC Count: ${Array.isArray(port.endpoint_macs) ? port.endpoint_macs.length : 0}`,
+    `Learned Interface MAC Count: ${macDiagnostic.count}`,
+    `MAC Evidence: ${macDiagnostic.message}`,
   ].join("\n");
+}
+
+function interfaceMacDiagnostic(port) {
+  const macs = Array.from(new Set(Array.isArray(port?.endpoint_macs) ? port.endpoint_macs.filter(Boolean) : [])).sort();
+  const provided = port?.mac_diagnostic;
+  if (provided && typeof provided === "object") {
+    return {
+      ...provided,
+      count: Number.isFinite(Number(provided.count)) ? Number(provided.count) : macs.length,
+      macs: Array.isArray(provided.macs) ? provided.macs : macs,
+      message: provided.message || "MAC evidence status is unavailable.",
+    };
+  }
+
+  const sourcePurpose = String(port?.source_purpose || "").toLowerCase();
+  const collectedPurposes = new Set(["check", "endpoints", "port-endpoints", "link-diagnostics", "switching"]);
+  const collected = port?.mac_table_collected === true || macs.length > 0 || collectedPurposes.has(sourcePurpose);
+  const status = String(port?.status || "unknown").toLowerCase();
+  if (macs.length > 1) {
+    return {
+      data_available: true,
+      collected: true,
+      reason: "multiple_macs_learned",
+      scope: "multiple-downstream",
+      count: macs.length,
+      macs,
+      message: `${macs.length} MAC addresses were learned. This can indicate an uplink, trunk, bridge, access point, phone plus PC, or virtualized host.`,
+    };
+  }
+  if (macs.length === 1) {
+    return {
+      data_available: true,
+      collected: true,
+      reason: "single_mac_learned",
+      scope: "single",
+      count: 1,
+      macs,
+      message: "One MAC address was learned on this interface in the stored snapshot.",
+    };
+  }
+  if (!collected) {
+    return {
+      data_available: false,
+      collected: false,
+      reason: "mac_table_not_collected",
+      scope: "unavailable",
+      count: 0,
+      macs,
+      message: "The source collection did not include usable MAC address-table evidence.",
+    };
+  }
+  return {
+    data_available: true,
+    collected: true,
+    reason: status === "connected" || status === "up" ? "no_mac_learned" : "port_not_up",
+    scope: "none",
+    count: 0,
+    macs,
+    message: status === "connected" || status === "up"
+      ? "The MAC table was collected, but no MAC was learned at snapshot time. The entry may have aged out or the endpoint may not have sent traffic."
+      : `No MAC was learned and the latest port status is ${status}.`,
+  };
 }
 
 function renderPortDetail(port, message = "Search for a port, IP, MAC, or device to inspect stored parsed state.") {
@@ -1717,6 +1781,7 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
     return;
   }
   setSeverityBadge(nodes.detailSeverity, portSeverity(port), `${shortInterfaceName(port.interface)} ${SEVERITY[portSeverity(port)].label}`);
+  const macDiagnostic = interfaceMacDiagnostic(port);
 
   const facts = [
     ["Interface", port.interface],
@@ -1726,7 +1791,8 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
     ["Speed / Duplex", `${text(port.speed)} / ${text(port.duplex)}`],
     ["Description", port.description],
     ["Endpoint IPs", listText(port.endpoint_ips)],
-    ["Endpoint MACs", listText(port.endpoint_macs)],
+    ["Interface MAC Diagnosis", macDiagnostic.message],
+    [`Learned Interface MACs (${macDiagnostic.count})`, listText(macDiagnostic.macs)],
     ["Neighbor", port.neighbor_name],
     ["Neighbor IP", port.neighbor_ip],
     ["Neighbor Platform", port.neighbor_platform],
@@ -1761,6 +1827,7 @@ function renderPortAuxiliaryDetail(port) {
     nodes.portHealthSummary.append(list);
   }
   if (nodes.vlanMacSummary) {
+    const macDiagnostic = interfaceMacDiagnostic(port);
     nodes.vlanMacSummary.replaceChildren();
     const list = document.createElement("dl");
     list.className = "facts compact-facts";
@@ -1768,15 +1835,38 @@ function renderPortAuxiliaryDetail(port) {
       ["VLAN", port.vlan],
       ["Mode", portMode(port)],
       ["Endpoint IPs", listText(port.endpoint_ips)],
-      ["Endpoint MACs", listText(port.endpoint_macs)],
-      ["Connected MAC Count", Array.isArray(port.endpoint_macs) ? port.endpoint_macs.length : 0],
+      ["MAC Evidence", macDiagnostic.data_available ? "MAC table collected" : "MAC table not collected"],
+      ["Learned Interface MAC Count", macDiagnostic.count],
+      ["Interpretation", macDiagnostic.message],
       ["Neighbor", port.neighbor_name],
       ["Neighbor IP", port.neighbor_ip],
       ["Neighbor Platform", port.neighbor_platform],
     ];
     appendFacts(list, rows);
     nodes.vlanMacSummary.className = "detail-section";
-    nodes.vlanMacSummary.append(list);
+    const evidence = document.createElement("section");
+    evidence.className = "interface-mac-evidence";
+    const heading = document.createElement("h4");
+    heading.textContent = `Learned Interface MACs (${macDiagnostic.count})`;
+    evidence.append(heading);
+    if (macDiagnostic.macs.length) {
+      const macList = document.createElement("ul");
+      macList.className = "interface-mac-list";
+      for (const mac of macDiagnostic.macs) {
+        const item = document.createElement("li");
+        const code = document.createElement("code");
+        code.textContent = mac;
+        item.append(code);
+        macList.append(item);
+      }
+      evidence.append(macList);
+    } else {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = macDiagnostic.message;
+      evidence.append(empty);
+    }
+    nodes.vlanMacSummary.append(list, evidence);
   }
 }
 
@@ -1903,6 +1993,7 @@ function renderConnectionDiagnostic(payload) {
   const history = Array.isArray(payload.history) ? payload.history : [];
   const window = payload.diagnostic_window || {};
   const sequence = payload.event_sequence;
+  const macDiagnostic = payload.mac_diagnostic || interfaceMacDiagnostic(port);
   const rows = [
     ["Diagnostic Window", `${window.minutes || 10} minutes · ${formatObservedAt(window.start)} - ${formatObservedAt(window.end)}`],
     ["Current State", displayConnectionState(port)],
@@ -1911,7 +2002,8 @@ function renderConnectionDiagnostic(payload) {
       : "No complete Physical Link/Line Protocol Up sequence in this window"],
     ["VLAN / Mode", `${text(port.vlan)} / ${portMode(port)}`],
     ["Endpoint IP", listText(payload.endpoint_ips)],
-    ["Endpoint MAC", listText(payload.endpoint_macs)],
+    ["Learned Interface MACs", listText(macDiagnostic.macs)],
+    ["MAC Diagnosis", macDiagnostic.message],
     ["Port Errors", payload.total_errors || 0],
     ["Last Link Event", lastEvent ? `${formatObservedAt(lastEvent.timestamp)} · ${lastEvent.event.toUpperCase()} ${lastEvent.state.toUpperCase()}` : "No stored LINK/LINEPROTO event"],
     ["State History", history.length ? history.map((item) => `${formatObservedAt(item.timestamp)} ${item.status}`).join(" → ") : "No stored state transition"],
