@@ -57,7 +57,7 @@ class ChangeFoundationTests(unittest.TestCase):
                 approver=Principal("operator-a", "approver"),
             )
 
-    def test_change_audit_is_dedicated_and_no_execution_route_is_exposed(self) -> None:
+    def test_change_audit_is_dedicated_and_execution_route_is_disabled_by_default(self) -> None:
         device = load_devices("inventory/devices.csv")[1]
         proposal, _ = prepare_interface_admin_change(
             device,
@@ -75,8 +75,17 @@ class ChangeFoundationTests(unittest.TestCase):
         self.assertEqual(record["commands"], ["configure terminal", "interface Ethernet1", "shutdown", "end"])
 
         client = TestClient(create_app())
-        response = client.post("/changes/interface-admin-state")
-        self.assertEqual(response.status_code, 404)
+        capabilities = client.get("/change-capabilities")
+        response = client.post(
+            "/devices/arista-10g-core/port-admin-state/proposals",
+            json={
+                "interface": "Et1",
+                "desired_state": "shutdown",
+            },
+        )
+        self.assertEqual(capabilities.status_code, 200)
+        self.assertIs(capabilities.json()["enabled"], False)
+        self.assertEqual(response.status_code, 403)
 
 
 if __name__ == "__main__":

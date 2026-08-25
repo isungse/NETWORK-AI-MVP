@@ -2,7 +2,7 @@
 
 ## Goal
 
-Provide a read-only network operations console that inventories devices, runs allowlisted diagnostics, stores redacted observations, and presents actionable port, endpoint, topology, and health information.
+Provide a network operations console that inventories devices, runs allowlisted diagnostics, stores redacted observations, presents actionable port, endpoint, topology, and health information, and supports narrowly controlled local port isolation and recovery.
 
 ## Implemented Capabilities
 
@@ -18,6 +18,7 @@ Provide a read-only network operations console that inventories devices, runs al
 - Physical LINK Up to Line Protocol Up sequence detection.
 - Current-port and other-port LINK/LINEPROTO event summaries.
 - Vercel-hosted read-only reference UI.
+- Local-only, default-disabled single access-port `shutdown` and `no shutdown` workflow with approval-code execution, live pre/post verification, rollback preview, and dedicated audit records.
 
 ## Durable Limitations
 
@@ -28,6 +29,7 @@ Provide a read-only network operations console that inventories devices, runs al
 - Collection is manual; there is no persistent scheduler or polling service.
 - The active collector uses Telnet and should be migrated to a secure transport.
 - The API does not yet provide complete operator authentication and authorization for shared on-premises use.
+- Controlled changes use a local approval code without per-user identity attribution; production-grade RBAC and an external identity provider remain required before shared multi-user deployment.
 - JSON and JSONL persistence is suitable for the MVP but not for concurrent production polling.
 
 ## Runtime Guidance

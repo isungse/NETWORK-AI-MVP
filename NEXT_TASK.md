@@ -10,10 +10,10 @@
 ## Reliability and Security
 
 1. Replace Telnet with SSH, API, SNMP, NETCONF, or gNMI adapters where devices support them.
-2. Add operator authentication, authorization, and audit identity before sharing collection controls.
+2. Add authenticated operator identity and RBAC before sharing the local approval-code change controls beyond the trusted operations workstation.
 3. Move concurrent observation and audit storage to a transactional database.
 4. Add queue backpressure, per-device retry/backoff, timeouts, and stale-state handling.
-5. Keep arbitrary CLI and configuration-changing commands outside the MVP.
+5. Keep arbitrary CLI outside the MVP and retain the fixed-command, local-only boundary for configuration changes.
 
 ## Diagnostics
 

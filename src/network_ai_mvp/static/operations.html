@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Network AI MVP Operations</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/static/styles.css?v=20260714-4" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260825-2" />
   </head>
   <body data-page="operations" class="operations-page">
     <header class="topbar">
@@ -18,7 +18,7 @@
         <a class="monitor-link" href="/">Device Map</a>
         <a class="monitor-link" href="/monitoring" target="_blank" rel="noreferrer">Monitoring</a>
         <div class="mode-stack" aria-label="Safety mode">
-          <span class="mode-pill">READ-ONLY</span>
+          <span id="safetyMode" class="mode-pill">READ-ONLY</span>
         </div>
       </div>
     </header>
@@ -361,6 +361,20 @@
           <h3>Selected Port</h3>
           <dl id="portDetailFacts" class="facts compact-facts"></dl>
           <div id="portDetailState" class="summary-box">Search for a port, IP, MAC, or device to inspect stored parsed state.</div>
+          <section id="portControl" class="port-control" aria-labelledby="portControlTitle">
+            <div class="port-control-head">
+              <div>
+                <h3 id="portControlTitle">Port Control</h3>
+                <p id="portControlHint" class="muted">Select a live access-port observation to review controlled actions.</p>
+              </div>
+              <span id="portControlGate" class="mode-pill">Disabled</span>
+            </div>
+            <div class="port-control-actions">
+              <button id="shutdownPort" type="button" class="danger-button" disabled>포트 차단</button>
+              <button id="restorePort" type="button" class="restore-button" disabled>포트 복구</button>
+            </div>
+            <div id="portControlStatus" class="port-control-status" aria-live="polite">No change action is available.</div>
+          </section>
         </section>
 
         <section class="detail-pane" data-detail-pane="health">
@@ -413,6 +427,30 @@
       </aside>
     </main>
 
-    <script src="/static/app.js?v=20260715-1" defer></script>
+    <dialog id="portChangeDialog" class="port-change-dialog" aria-labelledby="portChangeTitle">
+      <form id="portChangeForm">
+        <div class="port-change-head">
+          <div>
+            <span class="eyebrow">Controlled change</span>
+            <h2 id="portChangeTitle">Port admin state</h2>
+          </div>
+          <button id="closePortChange" type="button" class="dialog-close" aria-label="Close">×</button>
+        </div>
+        <div id="portChangeTarget" class="change-target"></div>
+        <p class="change-warning">The server will run a live precheck and postcheck. Trunks, uplinks, and observed-neighbor ports are blocked. The running configuration is not saved.</p>
+        <section id="portChangeReview" class="change-review" hidden>
+          <h3>검토된 명령</h3>
+          <ol id="portChangeCommands" class="command-list"></ol>
+          <p id="portChangeRollback" class="muted"></p>
+          <label>승인 코드<input id="changeApprovalCode" type="password" autocomplete="one-time-code" /></label>
+          <div class="change-dialog-actions">
+            <button id="executePortChange" type="button" class="danger-button" disabled>변경 실행</button>
+          </div>
+        </section>
+        <div id="portChangeStatus" class="port-control-status" aria-live="polite"></div>
+      </form>
+    </dialog>
+
+    <script src="/static/app.js?v=20260825-3" defer></script>
   </body>
 </html>

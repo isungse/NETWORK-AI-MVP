@@ -158,6 +158,7 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
   min-height: 26px;
   height: 32px;
   border: 1px solid var(--ok);
@@ -165,6 +166,7 @@ select {
   color: var(--ok);
   font-weight: 700;
   padding: 2px 10px;
+  white-space: nowrap;
 }
 
 .mode-note,
@@ -1718,6 +1720,170 @@ tr.device-row.selected {
 .detail-pane h3 + .detail-section,
 .detail-pane h3 + .summary-box {
   margin-top: 8px;
+}
+
+.port-control {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  padding: 12px;
+}
+
+.port-control-head,
+.port-change-head,
+.change-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.port-control-head h3,
+.port-control-head p,
+.port-change-head h2 {
+  margin: 0;
+}
+
+.port-control-head {
+  align-items: flex-start;
+}
+
+.port-control-head > div {
+  min-width: 0;
+}
+
+.port-control-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.danger-button {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.danger-button:hover:not(:disabled) {
+  border-color: var(--down);
+  background: var(--down);
+}
+
+.restore-button {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.restore-button:hover:not(:disabled) {
+  border-color: #185b40;
+  background: #185b40;
+}
+
+.port-control-status {
+  min-height: 22px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.port-control-status.error {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.port-control-status.ok {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.port-change-dialog {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.25);
+  padding: 0;
+}
+
+.port-change-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.port-change-dialog form {
+  padding: 18px;
+}
+
+.dialog-close {
+  min-width: 34px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--secondary);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.dialog-close:hover:not(:disabled) {
+  background: var(--subtle);
+  color: var(--ink);
+}
+
+.change-target {
+  margin-top: 14px;
+  border-left: 4px solid var(--accent);
+  background: var(--soft);
+  padding: 10px 12px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-weight: 700;
+}
+
+.change-warning {
+  border: 1px solid rgba(161, 98, 7, 0.3);
+  border-radius: 7px;
+  background: #fffaf0;
+  color: var(--warn);
+  padding: 10px;
+}
+
+.change-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.change-form-grid label,
+.change-review label {
+  display: grid;
+  gap: 5px;
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.change-form-grid input,
+.change-review input {
+  min-width: 0;
+  width: 100%;
+}
+
+.change-form-wide {
+  grid-column: 1 / -1;
+}
+
+.change-dialog-actions {
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.change-review {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.change-review h3 {
+  margin: 0;
 }
 
 .detail-section {

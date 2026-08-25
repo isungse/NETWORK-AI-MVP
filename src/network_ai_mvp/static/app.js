@@ -70,12 +70,16 @@ const state = {
   selectionLoading: true,
   selectedDiagnostics: null,
   connectionDiagnosticRequestId: 0,
+  changeCapabilities: null,
+  pendingPortChange: null,
+  pendingPortChangeAction: "",
 };
 
 const page = document.body.dataset.page || "operations";
 
 const nodes = {
   apiStatus: document.querySelector("#apiStatus"),
+  safetyMode: document.querySelector("#safetyMode"),
   dashboardUpdated: document.querySelector("#dashboardUpdated"),
   healthCards: document.querySelector("#healthCards"),
   topologyMap: document.querySelector("#topologyMap"),
@@ -139,6 +143,22 @@ const nodes = {
   diagnosePort: document.querySelector("#diagnosePort"),
   portDetailFacts: document.querySelector("#portDetailFacts"),
   portDetailState: document.querySelector("#portDetailState"),
+  portControlGate: document.querySelector("#portControlGate"),
+  portControlHint: document.querySelector("#portControlHint"),
+  portControlStatus: document.querySelector("#portControlStatus"),
+  shutdownPort: document.querySelector("#shutdownPort"),
+  restorePort: document.querySelector("#restorePort"),
+  portChangeDialog: document.querySelector("#portChangeDialog"),
+  portChangeForm: document.querySelector("#portChangeForm"),
+  portChangeTitle: document.querySelector("#portChangeTitle"),
+  portChangeTarget: document.querySelector("#portChangeTarget"),
+  closePortChange: document.querySelector("#closePortChange"),
+  portChangeReview: document.querySelector("#portChangeReview"),
+  portChangeCommands: document.querySelector("#portChangeCommands"),
+  portChangeRollback: document.querySelector("#portChangeRollback"),
+  changeApprovalCode: document.querySelector("#changeApprovalCode"),
+  executePortChange: document.querySelector("#executePortChange"),
+  portChangeStatus: document.querySelector("#portChangeStatus"),
   collectionResult: document.querySelector("#collectionResult"),
   auditBody: document.querySelector("#auditBody"),
   refreshDevices: document.querySelector("#refreshDevices"),
@@ -1862,6 +1882,7 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
     return;
   }
   state.selectedPort = port;
+  renderPortControl();
   nodes.portDetailFacts.replaceChildren();
   nodes.diagnosePort.disabled = !state.selectedDevice || !port;
   if (!port) {
@@ -1871,6 +1892,7 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
     nodes.vlanMacSummary && (nodes.vlanMacSummary.textContent = "Select a parsed port to inspect VLAN, mode, endpoints, and neighbors.");
     renderConnectionDiagnostic(null);
     setSeverityBadge(nodes.detailSeverity, state.selectedDevice ? deviceStatus(state.selectedDevice) : "unknown");
+    renderPortControl();
     return;
   }
   setSeverityBadge(nodes.detailSeverity, portSeverity(port), `${shortInterfaceName(port.interface)} ${SEVERITY[portSeverity(port)].label}`);
@@ -1899,6 +1921,172 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
   nodes.portDetailState.textContent = "Stored parsed observation loaded. Documentation/reference data is not treated as live truth.";
   renderPortAuxiliaryDetail(port);
   loadPortConnectionDiagnostic(port).catch((error) => renderConnectionDiagnostic({ error: error.message }));
+  renderPortControl();
+}
+
+async function loadChangeCapabilities() {
+  try {
+    state.changeCapabilities = await api("/change-capabilities");
+  } catch (error) {
+    state.changeCapabilities = { enabled: false, message: error.message };
+  }
+  if (nodes.safetyMode) {
+    nodes.safetyMode.textContent = state.changeCapabilities?.enabled ? "CONTROLLED LOCAL" : "READ-ONLY";
+  }
+  renderPortControl();
+}
+
+function portChangeEligibility() {
+  const capabilities = state.changeCapabilities;
+  const device = state.selectedDevice;
+  const port = state.selectedPort;
+  if (!capabilities?.enabled) {
+    return { enabled: false, message: capabilities?.message || "Controlled changes are disabled for this runtime." };
+  }
+  if (!device || !port) {
+    return { enabled: false, message: "Select a parsed port to review controlled actions." };
+  }
+  if (!isCollectable(device)) {
+    return { enabled: false, message: "This device does not have a supported local collector." };
+  }
+  if (portMode(port) !== "access") {
+    return { enabled: false, message: "Trunk and routed ports are protected from UI changes." };
+  }
+  if (port.neighbor_name || port.neighbor_ip) {
+    return { enabled: false, message: "Observed-neighbor ports are protected as possible uplinks." };
+  }
+  const status = normalizePortOperationalStatus(port.status);
+  if (status === "fault") {
+    return { enabled: false, message: "Errdisabled ports require diagnosis before an administrative reset." };
+  }
+  return {
+    enabled: true,
+    shutdown: status !== "admin-disabled",
+    restore: status === "admin-disabled",
+    message: status === "admin-disabled"
+      ? "This access port is administratively disabled. A reviewed restore is available."
+      : "This access port can be administratively isolated after review and approval.",
+  };
+}
+
+function renderPortControl() {
+  if (!nodes.shutdownPort || !nodes.restorePort || !nodes.portControlStatus) {
+    return;
+  }
+  const eligibility = portChangeEligibility();
+  nodes.shutdownPort.disabled = !eligibility.enabled || !eligibility.shutdown;
+  nodes.restorePort.disabled = !eligibility.enabled || !eligibility.restore;
+  nodes.portControlStatus.textContent = eligibility.message;
+  nodes.portControlStatus.className = "port-control-status";
+  if (nodes.portControlGate) {
+    nodes.portControlGate.textContent = state.changeCapabilities?.enabled ? "승인 필요" : "비활성화";
+  }
+  if (nodes.portControlHint) {
+    nodes.portControlHint.textContent = state.changeCapabilities?.enabled
+      ? "Single access-port running-config control with live verification."
+      : "Enable the protected local change gate to use port control.";
+  }
+}
+
+async function openPortChangeDialog(desiredState) {
+  const eligibility = portChangeEligibility();
+  if (!eligibility.enabled || (desiredState === "shutdown" ? !eligibility.shutdown : !eligibility.restore)) {
+    nodes.portControlStatus.textContent = eligibility.message;
+    nodes.portControlStatus.className = "port-control-status error";
+    return;
+  }
+  state.pendingPortChange = null;
+  state.pendingPortChangeAction = desiredState;
+  nodes.portChangeForm?.reset();
+  if (nodes.portChangeReview) nodes.portChangeReview.hidden = true;
+  if (nodes.portChangeCommands) nodes.portChangeCommands.replaceChildren();
+  if (nodes.executePortChange) nodes.executePortChange.disabled = true;
+  if (nodes.portChangeStatus) {
+    nodes.portChangeStatus.textContent = "고정 변경 명령과 복구 계획을 준비하고 있습니다…";
+    nodes.portChangeStatus.className = "port-control-status";
+  }
+  const actionLabel = desiredState === "shutdown" ? "포트 차단" : "포트 복구";
+  if (nodes.portChangeTitle) nodes.portChangeTitle.textContent = actionLabel;
+  if (nodes.portChangeTarget) {
+    nodes.portChangeTarget.textContent = `${state.selectedDevice.hostname} · ${state.selectedDevice.management_ip} · ${state.selectedPort.interface}`;
+  }
+  nodes.portChangeDialog?.showModal();
+  await preparePortChange();
+}
+
+async function preparePortChange() {
+  if (!state.selectedDevice || !state.selectedPort || !state.pendingPortChangeAction) return;
+  nodes.portChangeStatus.textContent = "저장된 포트 상태를 확인하고 변경 계획을 준비하고 있습니다…";
+  nodes.portChangeStatus.className = "port-control-status";
+  try {
+    const proposal = await api(
+      `/devices/${encodeURIComponent(state.selectedDevice.device_id)}/port-admin-state/proposals`,
+      {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          interface: state.selectedPort.interface,
+          desired_state: state.pendingPortChangeAction,
+        }),
+      },
+    );
+    state.pendingPortChange = proposal;
+    nodes.portChangeCommands.replaceChildren();
+    for (const command of proposal.commands || []) {
+      const item = document.createElement("li");
+      item.textContent = command;
+      nodes.portChangeCommands.append(item);
+    }
+    nodes.portChangeRollback.textContent = `Rollback: ${(proposal.rollback_commands || []).join(" → ")}`;
+    nodes.changeApprovalCode.value = "";
+    nodes.portChangeReview.hidden = false;
+    nodes.executePortChange.textContent = proposal.desired_state === "shutdown" ? "포트 차단 실행" : "포트 복구 실행";
+    nodes.portChangeStatus.textContent = "검토된 명령을 확인한 뒤 승인 코드를 입력하세요.";
+    nodes.portChangeStatus.className = "port-control-status";
+  } catch (error) {
+    state.pendingPortChange = null;
+    nodes.portChangeStatus.textContent = error.message;
+    nodes.portChangeStatus.className = "port-control-status error";
+  }
+}
+
+function updatePortChangeExecuteButton() {
+  if (!nodes.executePortChange) return;
+  nodes.executePortChange.disabled = !state.pendingPortChange ||
+    !nodes.changeApprovalCode?.value;
+}
+
+async function executePortChange() {
+  const proposal = state.pendingPortChange;
+  if (!proposal) return;
+  nodes.executePortChange.disabled = true;
+  nodes.portChangeStatus.textContent = "실시간 사전 점검 후 변경을 실행하고 다시 검증합니다…";
+  nodes.portChangeStatus.className = "port-control-status";
+  try {
+    const result = await api(`/changes/${encodeURIComponent(proposal.proposal_id)}/execute`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        approval_token: nodes.changeApprovalCode.value,
+      }),
+    });
+    nodes.changeApprovalCode.value = "";
+    nodes.portChangeStatus.textContent = `${result.interface}: ${result.verified_status} 확인 완료. running-config는 저장하지 않았습니다.`;
+    nodes.portChangeStatus.className = "port-control-status ok";
+    nodes.portControlStatus.textContent = nodes.portChangeStatus.textContent;
+    nodes.portControlStatus.className = "port-control-status ok";
+    await loadPorts(state.selectionRequestId, { trigger: "collection" });
+    const updatedPort = state.latestPorts.find((port) => port.interface === result.interface) || result.verified_port;
+    renderPortDetail(updatedPort);
+    state.pendingPortChange = null;
+    setStatus(`${result.interface} controlled change verified.`, true);
+  } catch (error) {
+    nodes.portChangeStatus.textContent = error.message;
+    nodes.portChangeStatus.className = "port-control-status error";
+    setStatus(error.message, false);
+  } finally {
+    updatePortChangeExecuteButton();
+  }
 }
 
 function renderPortAuxiliaryDetail(port) {
@@ -4148,6 +4336,26 @@ nodes.searchInput?.addEventListener("keydown", (event) => {
 nodes.diagnosePort?.addEventListener("click", () => {
   diagnoseSelectedPort().catch((error) => renderSummary(error.message, "error"));
 });
+nodes.shutdownPort?.addEventListener("click", () => {
+  openPortChangeDialog("shutdown").catch((error) => {
+    nodes.portChangeStatus.textContent = error.message;
+    nodes.portChangeStatus.className = "port-control-status error";
+  });
+});
+nodes.restorePort?.addEventListener("click", () => {
+  openPortChangeDialog("no shutdown").catch((error) => {
+    nodes.portChangeStatus.textContent = error.message;
+    nodes.portChangeStatus.className = "port-control-status error";
+  });
+});
+nodes.closePortChange?.addEventListener("click", () => nodes.portChangeDialog?.close());
+nodes.changeApprovalCode?.addEventListener("input", updatePortChangeExecuteButton);
+nodes.executePortChange?.addEventListener("click", () => {
+  executePortChange().catch((error) => {
+    nodes.portChangeStatus.textContent = error.message;
+    nodes.portChangeStatus.className = "port-control-status error";
+  });
+});
 nodes.pingTest?.addEventListener("click", () => {
   runSelectedPortPing().catch((error) => renderSummary(error.message, "error"));
 });
@@ -4189,14 +4397,14 @@ window.addEventListener("resize", () => {
   renderTopologyMap();
 });
 
-Promise.allSettled([api("/health"), loadDevices(), loadAudit()]).then(
-  ([healthResult, devicesResult, auditResult]) => {
+Promise.allSettled([api("/health"), loadDevices(), loadAudit(), loadChangeCapabilities()]).then(
+  ([healthResult, devicesResult, auditResult, changeCapabilitiesResult]) => {
     if (healthResult.status === "rejected") {
       setStatus(healthResult.reason.message, false);
       return;
     }
 
-    const failedSections = [devicesResult, auditResult].filter((result) => result.status === "rejected");
+    const failedSections = [devicesResult, auditResult, changeCapabilitiesResult].filter((result) => result.status === "rejected");
     setStatus(
       failedSections.length
         ? `API connected. ${failedSections.length} section(s) could not be loaded.`

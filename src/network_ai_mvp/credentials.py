@@ -23,3 +23,9 @@ def resolve_credential_path(credential_ref: str) -> Path:
             f"Set {env_var} to the local encrypted credential file path."
         )
     return Path(configured)
+
+
+def resolve_enable_credential_path(credential_ref: str) -> Path | None:
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", credential_ref).strip("_").upper()
+    configured = os.environ.get(f"NETWORK_AI_ENABLE_CREDENTIAL_{normalized}")
+    return Path(configured) if configured else None

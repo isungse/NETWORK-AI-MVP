@@ -1,6 +1,6 @@
 # Network AI MVP
 
-Read-only foundation for a company network management AI agent.
+Network operations foundation with read-only diagnostics and a protected local port-control workflow.
 
 ## Current Scope
 
@@ -9,7 +9,7 @@ Read-only foundation for a company network management AI agent.
 - Low-speed and interface error diagnostic rules.
 - Local FastAPI app and dense read-only web UI for inventory, command plans, collection metadata, diagnostics, endpoint lookup, and audit history.
 
-No configuration commands are implemented in this MVP foundation.
+Configuration changes are disabled by default. The local runtime can enable only fixed single-port `shutdown` and `no shutdown` actions through the protected workflow described below.
 
 ## Safety Rules
 
@@ -106,6 +106,18 @@ $env:NETWORK_AI_CREDENTIAL_ARISTA_KCL="$env:USERPROFILE\arista_kcl.cred.xml"
 Collection attempts are appended to `logs/collection_audit.jsonl`. Audit records include device metadata, purpose, allowlisted commands, success/failure, return code, and an error summary, but not passwords.
 
 Telnet support is temporary and insecure. Prefer SSH or an API transport before using this outside the local MVP phase.
+
+## Local Controlled Port Changes
+
+The Operations Port Detail panel can prepare and execute a fixed single-interface `shutdown` or `no shutdown` plan. This feature is local-only and remains disabled unless both gates are configured before the API starts:
+
+```powershell
+$env:NETWORK_AI_ENABLE_CHANGES='1'
+$env:NETWORK_AI_CHANGE_APPROVAL_TOKEN='<locally-managed-approval-code>'
+$env:NETWORK_AI_ENABLE_CREDENTIAL_ARISTA_KCL="$env:USERPROFILE\arista_enable.cred.xml"
+```
+
+The workflow shows the fixed command and rollback plan, then requires only the locally configured approval code before successful live pre/post interface collections. It rejects trunks and ports with observed network neighbors. It records change events separately under `logs/change_audit.jsonl` and never runs `write memory`; a restart will discard the port change unless an operator separately approves persistence.
 
 ## Vercel Deployment
 

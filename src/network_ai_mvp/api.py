@@ -9,7 +9,7 @@ from typing import Callable
 
 from .audit import read_audit_events
 from .collector import CollectionQueue, CollectorRegistry
-from .credentials import resolve_credential_path
+from .credentials import resolve_credential_path, resolve_enable_credential_path
 from .diagnostics import assess_device_risks, summarize_findings
 from .executor import PowerShellTelnetReadOnlyExecutor
 from .inventory import InventoryError, InventoryRepository
@@ -22,8 +22,10 @@ from .policy import CommandPolicyError, allowed_purposes, build_command_plan
 from .search import search_network_state
 from .services.collection import public_command_plan, public_device, public_job_snapshot
 from .services.collection_workflow import CollectionWorkflow, WorkflowError
+from .services.change_workflow import ChangeWorkflow, ChangeWorkflowError
 from .services.monitoring import MonitoringHub
 from .services.topology import build_topology
+from .write_executor import PowerShellTelnetWriteExecutor
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 IS_VERCEL = bool(os.environ.get("VERCEL"))
@@ -34,6 +36,7 @@ RUNTIME_ROOT = Path(
 DEFAULT_INVENTORY = PROJECT_ROOT / "inventory" / "devices.csv"
 DEFAULT_BACKBONE_NEIGHBORS = PROJECT_ROOT / "inventory" / "backbone_neighbors.json"
 DEFAULT_AUDIT_LOG = RUNTIME_ROOT / "logs" / "collection_audit.jsonl"
+DEFAULT_CHANGE_AUDIT_LOG = RUNTIME_ROOT / "logs" / "change_audit.jsonl"
 # Packaged observations are read-only reference snapshots in Vercel. Observation
 # readers are side-effect free, so the deployed data can be inspected safely.
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
@@ -49,6 +52,11 @@ def create_app(
     data_dir: str | Path = DEFAULT_DATA_DIR,
     executor: PowerShellTelnetReadOnlyExecutor | None = None,
     credential_resolver: Callable[[str], str | Path] = resolve_credential_path,
+    change_audit_log_path: str | Path = DEFAULT_CHANGE_AUDIT_LOG,
+    change_executor: object | None = None,
+    enable_credential_resolver: Callable[[str], str | Path | None] = resolve_enable_credential_path,
+    change_enabled: bool | None = None,
+    approval_token: str | None = None,
     ping_executor: Callable[[str], dict[str, object]] | None = None,
 ):
     try:
@@ -63,6 +71,16 @@ def create_app(
     inventory = InventoryRepository(inventory_path)
     collection_queue = CollectionQueue()
     monitoring_hub = MonitoringHub()
+    controlled_changes_enabled = (
+        bool(os.environ.get("NETWORK_AI_ENABLE_CHANGES") == "1")
+        if change_enabled is None
+        else change_enabled
+    ) and not IS_VERCEL
+    configured_approval_token = (
+        os.environ.get("NETWORK_AI_CHANGE_APPROVAL_TOKEN", "")
+        if approval_token is None
+        else approval_token
+    )
     collection_workflow = CollectionWorkflow(
         inventory=inventory,
         audit_log_path=audit_log_path,
@@ -72,6 +90,17 @@ def create_app(
         credential_resolver=credential_resolver,
         collector_registry=DEFAULT_COLLECTOR_REGISTRY,
         monitoring_hub=monitoring_hub,
+    )
+    change_workflow = ChangeWorkflow(
+        inventory=inventory,
+        data_dir=data_dir,
+        audit_log_path=change_audit_log_path,
+        collection_workflow=collection_workflow,
+        write_executor=change_executor or PowerShellTelnetWriteExecutor(),
+        credential_resolver=credential_resolver,
+        enable_credential_resolver=enable_credential_resolver,
+        enabled=controlled_changes_enabled,
+        approval_token=configured_approval_token,
     )
 
     @asynccontextmanager
@@ -115,9 +144,13 @@ def create_app(
     def health() -> dict[str, str]:
         return {
             "status": "ok",
-            "mode": "read-only",
+            "mode": "controlled-change" if change_workflow.enabled else "read-only",
             "monitoring_transport": "poll" if IS_VERCEL else "sse",
         }
+
+    @app.get("/change-capabilities")
+    def change_capabilities():
+        return change_workflow.capabilities()
 
     @app.get("/devices")
     def devices():
@@ -330,6 +363,27 @@ def create_app(
     @app.post("/devices/{device_id}/check/jobs")
     def enqueue_check(device_id: str):
         return _workflow_response(collection_workflow.enqueue_check, device_id)
+
+    @app.post("/devices/{device_id}/port-admin-state/proposals")
+    def prepare_port_admin_state(device_id: str, payload: dict[str, str]):
+        try:
+            return change_workflow.prepare(
+                device_id=device_id,
+                interface=str(payload.get("interface") or ""),
+                desired_state=str(payload.get("desired_state") or ""),
+            )
+        except ChangeWorkflowError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    @app.post("/changes/{proposal_id}/execute")
+    def execute_port_admin_state(proposal_id: str, payload: dict[str, str]):
+        try:
+            return change_workflow.execute(
+                proposal_id=proposal_id,
+                approval_token=str(payload.get("approval_token") or ""),
+            )
+        except ChangeWorkflowError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     @app.get("/collection-jobs/{job_id}")
     def collection_job(job_id: str):

@@ -32,4 +32,13 @@ The ingest endpoint must authenticate the collector, validate payloads, rate-lim
 - Treat Telnet as a temporary legacy transport and prefer SSH, API, SNMP, NETCONF, or gNMI where supported.
 - Keep management addresses and raw CLI output limited to authorized operational users.
 
+## Local Controlled Change Plane
+
+- Configuration changes are disabled by default and must never run from the Vercel deployment.
+- The on-premises API may expose only fixed, backend-validated single-interface `shutdown` and `no shutdown` plans when the local change gate and approval code are configured.
+- A controlled change requires the locally configured approval code, live read-only precheck and postcheck, reviewed fixed commands with rollback guidance, and a dedicated audit record.
+- Trunk ports, observed-neighbor ports, and other possible uplinks are not eligible for UI-driven changes.
+- Quick port isolation and recovery modify running configuration only. They must not execute `write memory` or `copy running-config startup-config` implicitly.
+- Keep the write executor isolated from the read-only command allowlist and reject every command shape except the fixed single-interface admin-state plan.
+
 Git and Vercel operating procedures belong in [`workflow.md`](workflow.md).
