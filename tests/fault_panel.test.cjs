@@ -107,3 +107,21 @@ for (const speed of ["10", "a-10", "10M", "a-10M", "10Mbps"]) {
 for (const speed of ["100", "a-100M", "1G", "10G", "auto", ""]) {
   assert.equal(panel.portView(device, { ...port, speed }).state, "connected");
 }
+
+const arista4f = panel.groups({
+  ...device, platform: "DCS-7050TX3",
+  port_states: [{kind: "uplink", interface: "Et56/1", state: "normal"}],
+  panel_ports: [
+    ...Array.from({length: 48}, (_, i) => ({interface: `Et${i+1}`, status: "connected"})),
+    ...Array.from({length: 8}, (_, i) => ({interface: `Et${i+49}/1`, status: "connected"})),
+  ],
+});
+assert.equal(arista4f.groups.length, 1);
+assert.equal(arista4f.groups[0].ports.length, 56);
+const uplinkBank = arista4f.groups[0].banks.at(-1);
+assert.equal(uplinkBank.start, 49);
+assert.equal(uplinkBank.end, 56);
+assert.equal(new Set(uplinkBank.ports.map(p => p.number)).size, 8);
+assert.equal(uplinkBank.ports.at(-1).view.name, "Et56/1");
+assert.ok(uplinkBank.ports.at(-1).view.roles.includes("업링크"));
+assert.equal(panel.physical("Gi1/0/28", device).slot, "1/0");

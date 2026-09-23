@@ -26,11 +26,15 @@ const FaultPanel = (() => {
     const match = name.match(/^(Et|Gi|Te|Fa)(\d+(?:\/\d+)*)$/i);
     if (!match) return null;
     const path = match[2].split("/");
+    // On this fixed Arista model Et49/1 denotes port 49, lane 1, not slot 49.
+    const fixedLane = device.platform === "DCS-7050TX3" &&
+      match[1].toLowerCase() === "et" && path.length === 2 && path[1] === "1" &&
+      Number(path[0]) >= 49 && Number(path[0]) <= 56;
     return {
       name,
-      number: Number(path.at(-1)),
+      number: Number(fixedLane ? path[0] : path.at(-1)),
       prefix: match[1],
-      slot: path.slice(0, -1).join("/"),
+      slot: fixedLane ? "" : path.slice(0, -1).join("/"),
     };
   }
   function portView(device, port) {
