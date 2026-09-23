@@ -4,6 +4,7 @@ const FaultPanel = (() => {
   const states = {
     critical: { label: "장애", icon: "!" },
     pending: { label: "재확인", icon: "◷" },
+    slow: { label: "저속 10Mbps", icon: "!" },
     connected: { label: "연결", icon: "✓" },
     idle: { label: "미연결", icon: "−" },
     disabled: { label: "비활성", icon: "Ⅱ" },
@@ -65,6 +66,9 @@ const FaultPanel = (() => {
       else if (["errdisabled", "err-disabled"].includes(status))
         state = "error";
     }
+    const speed = String(port.speed || "").trim();
+    if (state === "connected" && /^(?:a-)?10(?:m(?:bps)?)?$/i.test(speed))
+      state = "slow";
     const roles = [];
     if (metrics.some((p) => p.kind === "uplink")) roles.push("업링크");
     if (metrics.some((p) => p.kind === "important")) roles.push("중요");

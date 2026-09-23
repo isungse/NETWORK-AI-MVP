@@ -189,14 +189,12 @@ function renderSwitchPanel(d) {
         button.style.gridColumn =
           Math.floor((item.number - bank.start) / 2) + 1;
         button.style.gridRow = item.number % 2 ? 1 : 2;
-        const role = view.roles
-          .map((r) => (r === "업링크" ? "↑" : "★"))
-          .join("");
         const accessible = `${d.hostname} · ${view.name} · ${view.roles.join(" · ")} ${view.label}`;
         button.setAttribute("aria-label", accessible);
         button.title = `${accessible}${item.port.speed ? " · " + item.port.speed : ""}${view.metric ? " · " + view.metric.label : ""} · 선택하여 상세 보기`;
         const number = node("span", "socket-number", item.number);
-        number.append(node("span", "port-role", role));
+        if (view.roles.includes("업링크")) number.append(uplinkArrow());
+        if (view.roles.includes("중요")) number.append(node("span", "port-role", "★"));
         button.append(number, portSymbol());
         button.onclick = () => openDevice(d.device_id, view.name);
         grid.append(button);
@@ -221,10 +219,11 @@ function renderSwitchPanel(d) {
   card.append(rack);
   const targets = node("div", "panel-targets");
   for (const [kind, label, setting] of [
-    ["uplink", "↑ 업링크", "uplinks"],
+    ["uplink", "업링크", "uplinks"],
     ["important", "★ 중요 포트", "important_ports"],
   ]) {
     const line = node("div", "target-line");
+    if (kind === "uplink") line.append(uplinkArrow());
     line.append(node("strong", "", label));
     const entries = d.port_states.filter((p) => p.kind === kind);
     if (!entries.length)
@@ -278,6 +277,17 @@ function renderSwitchPanel(d) {
   );
   card.append(footer);
   return card;
+}
+function uplinkArrow() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 16 20");
+  svg.setAttribute("class", "uplink-arrow");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M8 0 0 9h5v11h6V9h5Z");
+  svg.append(path);
+  return svg;
 }
 function portSymbol() {
   const ns = "http://www.w3.org/2000/svg";
@@ -377,7 +387,8 @@ function renderDashboard(data) {
       );
       return label;
     }),
-    node("span", "role-legend", "↑ 업링크 · ★ 중요"),
+    uplinkArrow(),
+    node("span", "role-legend", "업링크 · ★ 중요"),
   );
   for (const [name, floors] of buildings) {
     if (floorFilter && JSON.parse(floorFilter)[0] !== name) continue;
@@ -678,9 +689,11 @@ function renderDetail(d) {
         ? "unknown"
         : m?.state ||
           (["connected", "up"].includes(p.status) ? "normal" : "maintenance");
-      const button = node("button", `port-tile ${status}`, p.interface);
+      const view = FaultPanel.portView(d, p);
+      const button = node("button", `port-tile ${view.state === "slow" ? "slow" : status}`, p.interface);
+      if (view.roles.includes("uplink") || view.roles.includes("업링크")) button.append(uplinkArrow());
       button.dataset.port = p.interface;
-      const label = !d.port_data_current
+      const label = view.state === "slow" ? view.label : !d.port_data_current
         ? "미확인"
         : m
           ? LABELS[status]

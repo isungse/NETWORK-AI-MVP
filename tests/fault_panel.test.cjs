@@ -97,3 +97,13 @@ assert.equal(chassis.groups[0].ports.length, 2);
 assert.equal(chassis.auxiliary, 1);
 assert.ok(panel.floorOrder("B1F") < panel.floorOrder("1F"));
 console.log("Fault panel state, scope, and layout checks passed");
+
+for (const speed of ["10", "a-10", "10M", "a-10M", "10Mbps"]) {
+  assert.equal(panel.portView(device, { ...port, speed }).state, "slow");
+  assert.equal(panel.portView({ ...device, port_data_current: false }, { ...port, speed }).state, "unknown");
+  assert.equal(panel.portView(device, { ...port, status: "notconnect", speed }).state, "idle");
+  assert.equal(panel.portView(recovery, { ...port, speed }).state, "pending");
+}
+for (const speed of ["100", "a-100M", "1G", "10G", "auto", ""]) {
+  assert.equal(panel.portView(device, { ...port, speed }).state, "connected");
+}

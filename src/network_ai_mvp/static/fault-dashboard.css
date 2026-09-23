@@ -18,8 +18,9 @@ body {
   background: var(--bg);
   color: var(--ink);
   font:
-    14px/1.6 "Segoe UI",
-    "Malgun Gothic",
+    15px/1.65 "Malgun Gothic",
+    "Apple SD Gothic Neo",
+    "Segoe UI",
     sans-serif;
 }
 button,
@@ -94,7 +95,7 @@ select {
 .brand small {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   letter-spacing: 0.08em;
 }
@@ -113,7 +114,7 @@ select {
   border-radius: 30px;
   padding: 6px 13px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 main {
   max-width: 1516px;
@@ -136,7 +137,7 @@ main {
   border: 0;
 }
 .metric-label {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--muted);
   display: block;
@@ -179,9 +180,9 @@ main {
 .eyebrow {
   margin: 0 0 5px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 650;
-  letter-spacing: 0.04em;
+  letter-spacing: normal;
 }
 h1 {
   font-size: 23px;
@@ -241,7 +242,7 @@ h3 {
 }
 .building-header span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .floor {
   padding: 18px 22px;
@@ -294,7 +295,7 @@ h3 {
   overflow-wrap: anywhere;
 }
 .device-head .location {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   margin: 3px 0 0;
 }
@@ -305,7 +306,7 @@ h3 {
   white-space: nowrap;
   border-radius: 5px;
   padding: 3px 8px;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
   background: #fff2d8;
   color: #79520c;
@@ -338,13 +339,13 @@ h3 {
 }
 .issue p {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .issue .field {
   display: block;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 14px;
   margin-bottom: 3px;
 }
 .issue .problem {
@@ -375,7 +376,7 @@ h3 {
 }
 .collection-note {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   text-align: right;
 }
 .empty {
@@ -424,7 +425,7 @@ dialog::backdrop {
   margin-bottom: 24px;
 }
 .fact dt {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
 }
 .fact dd {
@@ -441,7 +442,7 @@ dialog::backdrop {
   font-size: 13px;
 }
 .port-table th {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
   text-align: left;
   background: #f4f6fa;
@@ -478,7 +479,7 @@ dialog::backdrop {
   border-radius: 0;
   min-height: 0;
   padding: 5px;
-  font-size: 11px;
+  font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -504,11 +505,11 @@ dialog::backdrop {
   outline: 3px solid var(--blue);
 }
 .port-tile span {
-  font-size: 9px;
+  font-size: 14px;
 }
 .muted {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .selection {
   padding: 16px;
@@ -550,7 +551,7 @@ pre {
   padding: 14px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: 14px;
 }
 #changeDialog {
   width: min(600px, calc(100vw - 32px));
@@ -564,10 +565,10 @@ pre {
 .history-item {
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 12px;
+  font-size: 14px;
 }
 .pill-note {
-  font-size: 11px;
+  font-size: 14px;
   padding: 3px 8px;
   background: #eef2f8;
   border-radius: 4px;
@@ -613,7 +614,7 @@ pre {
     display: none;
   }
   .runtime {
-    font-size: 10px;
+    font-size: 14px;
     padding: 5px 8px;
   }
   main {
@@ -638,7 +639,7 @@ pre {
     font-size: 28px;
   }
   .metric.time .metric-value {
-    font-size: 12px;
+    font-size: 14px;
   }
   .section-heading {
     align-items: start;
@@ -660,13 +661,13 @@ pre {
     align-items: start;
   }
   .badge {
-    font-size: 10px;
+    font-size: 14px;
   }
   .issue {
     gap: 10px;
   }
   .issue p {
-    font-size: 11px;
+    font-size: 14px;
   }
   .dialog-body {
     padding: 16px;
