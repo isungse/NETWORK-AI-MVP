@@ -125,3 +125,18 @@ assert.equal(new Set(uplinkBank.ports.map(p => p.number)).size, 8);
 assert.equal(uplinkBank.ports.at(-1).view.name, "Et56/1");
 assert.ok(uplinkBank.ports.at(-1).view.roles.includes("업링크"));
 assert.equal(panel.physical("Gi1/0/28", device).slot, "1/0");
+
+const core = panel.groups({
+  ...device, platform: "DCS-7050SX3-48YC8-F",
+  port_states: [{kind: "uplink", interface: "Et47", state: "normal"}, {kind: "uplink", interface: "Et48", state: "normal"}],
+  panel_ports: [
+    ...Array.from({length: 48}, (_, i) => ({interface: `Et${i+1}`, status: "connected"})),
+    ...Array.from({length: 8}, (_, i) => ({interface: `Et${i+49}/1`, status: "connected"})),
+    {interface: "Ma1"}, {interface: "Po10"}, {interface: "Vl10"},
+  ],
+});
+assert.equal(core.groups.length, 1);
+assert.equal(core.groups[0].ports.length, 56);
+assert.equal(core.auxiliary, 3);
+assert.equal(core.groups[0].banks.at(-1).ports.at(-1).view.name, "Et56/1");
+assert.equal(core.groups[0].ports.filter(p => p.view.roles.includes("업링크")).length, 2);
