@@ -11,8 +11,8 @@
   "devices": {
     "cisco-backbone": {
       "building": null,
-      "floor": null,
-      "location_source": null,
+      "floor": "9F",
+      "location_source": "Operator confirmed: 9F computer room",
       "uplinks": null,
       "important_ports": null
     },

@@ -181,7 +181,7 @@ main {
 .socket-grid {
   display: grid;
   grid-template-columns: repeat(var(--socket-columns), minmax(0, 40px));
-  grid-template-rows: repeat(2, 70px);
+  grid-template-rows: repeat(2, 40px);
   gap: 5px 4px;
   width: calc(var(--socket-columns) * 44px - 4px);
   max-width: 100%;
@@ -194,7 +194,7 @@ main {
   min-width: 0;
   padding: 4px 2px;
   border: 1px solid var(--stroke);
-  border-radius: 7px;
+  border-radius: 0;
   color: var(--text);
   background: var(--fill);
   box-shadow: none;
@@ -232,8 +232,8 @@ main {
 }
 .socket-icon {
   display: block;
-  width: 28px;
-  height: 25px;
+  width: 20px;
+  height: 18px;
   flex-shrink: 0;
   stroke-width: 1.5;
   stroke-linecap: round;

@@ -197,15 +197,7 @@ function renderSwitchPanel(d) {
         button.title = `${accessible}${item.port.speed ? " · " + item.port.speed : ""}${view.metric ? " · " + view.metric.label : ""} · 선택하여 상세 보기`;
         const number = node("span", "socket-number", item.number);
         number.append(node("span", "port-role", role));
-        button.append(
-          number,
-          portSymbol(),
-          node(
-            "span",
-            "socket-status",
-            `${view.state === "critical" ? "! " : ""}${view.label}`,
-          ),
-        );
+        button.append(number, portSymbol());
         button.onclick = () => openDevice(d.device_id, view.name);
         grid.append(button);
       }
@@ -697,7 +689,7 @@ function renderDetail(d) {
             : p.status === "disabled"
               ? "비활성"
               : "미감시";
-      button.append(node("span", "", `${ICONS[status]} ${label}`));
+      button.setAttribute("aria-label", `${p.interface} · ${label}`);
       button.title = `${p.interface} · ${label} · ${p.speed || "속도 미확인"}`;
       button.onclick = () => selectPort(p, button);
       grid.append(button);
