@@ -1,0 +1,37 @@
+[Unit]
+Description=Network AI MVP on-premises monitoring
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/network-ai-mvp/app/src/network_ai_mvp/api.py
+ConditionPathExists=/etc/network-ai-mvp/collector-ready
+
+[Service]
+Type=simple
+User=network-ai
+Group=network-ai
+WorkingDirectory=/opt/network-ai-mvp/app
+EnvironmentFile=/etc/network-ai-mvp/runtime.env
+LoadCredentialEncrypted=arista_kcl:/etc/credstore.encrypted/network-ai-arista_kcl.cred
+LoadCredentialEncrypted=backbone_admin:/etc/credstore.encrypted/network-ai-backbone_admin.cred
+LoadCredentialEncrypted=cisco_access_admin:/etc/credstore.encrypted/network-ai-cisco_access_admin.cred
+LoadCredentialEncrypted=arista_enable:/etc/credstore.encrypted/network-ai-arista_enable.cred
+LoadCredentialEncrypted=change_approval:/etc/credstore.encrypted/network-ai-change_approval.cred
+Environment=NETWORK_AI_CREDENTIAL_ARISTA_KCL=%d/arista_kcl
+Environment=NETWORK_AI_CREDENTIAL_BACKBONE_ADMIN=%d/backbone_admin
+Environment=NETWORK_AI_CREDENTIAL_CISCO_ACCESS_ADMIN=%d/cisco_access_admin
+Environment=NETWORK_AI_ENABLE_CREDENTIAL_ARISTA_KCL=%d/arista_enable
+Environment=NETWORK_AI_CHANGE_APPROVAL_TOKEN_FILE=%d/change_approval
+ExecStart=/opt/network-ai-mvp/venv/bin/python -m uvicorn network_ai_mvp.api:create_app --factory --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=150
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/network-ai-mvp
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

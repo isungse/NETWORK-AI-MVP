@@ -172,3 +172,7 @@ Resolve and verify the absolute temporary path before any recursive cleanup on W
 - Update `PROJECT_STATUS.md` only when product capability or a durable limitation changes.
 - Update `NEXT_TASK.md` only when the prioritized backlog changes.
 - Do not append session-by-session histories to documentation.
+
+## On-Premises Release
+
+An on-premises service activation deploys the reviewed pushed commit as a Git archive to the internal server. It does not authorize a Vercel production promotion. Preserve data and encrypted credentials outside the artifact, record the release SHA on the server, validate collection before enabling the readiness marker, and verify systemd, Nginx, the health endpoint, actual observation freshness, and browser rendering. Roll back application code to the previous recorded commit while preserving runtime history. Runtime layout is documented in [on-premises operations](../../docs/network/ON_PREMISES_RUNTIME.md).

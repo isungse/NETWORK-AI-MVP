@@ -3,7 +3,8 @@
 ## Runtime Roles
 
 - Vercel hosts the read-only web UI and API for reviewed reference data.
-- A Windows collector inside the company network performs device collection because it can reach private management addresses and use the existing PowerShell Telnet adapter.
+- An on-premises collector inside the company network performs device collection. Windows uses the PowerShell adapter; Ubuntu uses the explicitly selected native Telnet adapter with systemd encrypted credentials.
+- The Ubuntu operational UI/API and collector run together as one systemd service behind an internal Nginx proxy. Runtime state is separate from the application artifact; see [runtime operations](../../docs/network/ON_PREMISES_RUNTIME.md).
 - Vercel Firewall controls inbound access to the hosted application. It does not create an outbound route from Vercel to the company network.
 
 ## Network Boundary

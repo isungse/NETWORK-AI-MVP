@@ -2,6 +2,10 @@
 
 Network operations foundation with read-only diagnostics and a protected local port-control workflow.
 
+The active UI is the Korean fault-monitoring console at `/operations`. See [fault monitoring](docs/network/FAULT_MONITORING.md) for explicit device scope, periodic collection settings, incident/recovery rules, and data limitations.
+
+Ubuntu installation and service operation: [On-premises runtime](docs/network/ON_PREMISES_RUNTIME.md).
+
 ## Current Scope
 
 - Seed inventory from documented Cisco and Arista devices.

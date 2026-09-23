@@ -137,6 +137,14 @@ class ChangeWorkflowTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 403)
         self.assertEqual(self.writer.calls, [])
 
+    def test_new_uplink_protection_is_rechecked_at_execution(self):
+        proposal = self.workflow.prepare(device_id="arista-b1f-2", interface="Et19", desired_state="shutdown")
+        self.workflow.protected_port_reason = lambda _device, _port: "Protected uplink"
+        with self.assertRaises(ChangeWorkflowError) as context:
+            self.workflow.execute(proposal_id=proposal["proposal_id"], approval_token="approved-secret")
+        self.assertEqual(context.exception.status_code, 409)
+        self.assertEqual(self.writer.calls, [])
+
     def test_routed_port_is_rejected_by_backend(self):
         with self.assertRaises(ChangeWorkflowError) as context:
             self.workflow._require_eligible_port(

@@ -2,10 +2,9 @@
 
 ## Highest Priority
 
-1. Add an on-premises scheduled collector that runs allowlisted diagnostics at controlled intervals.
+1. Confirm building/physical-floor metadata and designated uplink/important-port scopes in `inventory/monitoring.json`.
 2. Add authenticated outbound synchronization from the on-premises collector to persistent storage used by the Vercel UI.
-3. Display observation freshness, collection source, and last-success/last-failure status throughout the UI.
-4. Refresh and select the newest link-event port automatically after a successful `link-diagnostics` run.
+3. Confirm downstream business impact and maintenance exceptions for each monitored port; consider power-sensor integration only when a verified source is available.
 
 ## Reliability and Security
 

@@ -24,8 +24,11 @@ from .services.collection import public_command_plan, public_device, public_job_
 from .services.collection_workflow import CollectionWorkflow, WorkflowError
 from .services.change_workflow import ChangeWorkflow, ChangeWorkflowError
 from .services.monitoring import MonitoringHub
+from .services.fault_monitor import FaultMonitor
+from .services.port_protection import PortProtection
 from .services.topology import build_topology
 from .write_executor import PowerShellTelnetWriteExecutor
+from .collector.native_telnet import NativeTelnetCollector, NativeTelnetWriteExecutor
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 IS_VERCEL = bool(os.environ.get("VERCEL"))
@@ -41,7 +44,10 @@ DEFAULT_CHANGE_AUDIT_LOG = RUNTIME_ROOT / "logs" / "change_audit.jsonl"
 # readers are side-effect free, so the deployed data can be inspected safely.
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-DEFAULT_COLLECTOR_REGISTRY = CollectorRegistry((PowerShellTelnetReadOnlyExecutor(),))
+NATIVE_COLLECTOR = os.environ.get("NETWORK_AI_COLLECTOR") == "native"
+READ_EXECUTOR = NativeTelnetCollector if NATIVE_COLLECTOR else PowerShellTelnetReadOnlyExecutor
+WRITE_EXECUTOR = NativeTelnetWriteExecutor if NATIVE_COLLECTOR else PowerShellTelnetWriteExecutor
+DEFAULT_COLLECTOR_REGISTRY = CollectorRegistry((READ_EXECUTOR(),))
 
 
 def create_app(
@@ -58,6 +64,8 @@ def create_app(
     change_enabled: bool | None = None,
     approval_token: str | None = None,
     ping_executor: Callable[[str], dict[str, object]] | None = None,
+    monitoring_config_path: str | Path = PROJECT_ROOT / "inventory" / "monitoring.json",
+    polling_enabled: bool | None = None,
 ):
     try:
         from fastapi import FastAPI, HTTPException
@@ -66,7 +74,7 @@ def create_app(
     except ImportError as exc:
         raise RuntimeError("Install the API dependencies with: pip install -e .[api]") from exc
 
-    command_executor = executor or PowerShellTelnetReadOnlyExecutor()
+    command_executor = executor or READ_EXECUTOR()
     run_ping = ping_executor or ping_target
     inventory = InventoryRepository(inventory_path)
     collection_queue = CollectionQueue()
@@ -81,6 +89,8 @@ def create_app(
         if approval_token is None
         else approval_token
     )
+    if approval_token is None and os.environ.get("NETWORK_AI_CHANGE_APPROVAL_TOKEN_FILE"):
+        configured_approval_token = Path(os.environ["NETWORK_AI_CHANGE_APPROVAL_TOKEN_FILE"]).read_text().strip()
     collection_workflow = CollectionWorkflow(
         inventory=inventory,
         audit_log_path=audit_log_path,
@@ -91,26 +101,41 @@ def create_app(
         collector_registry=DEFAULT_COLLECTOR_REGISTRY,
         monitoring_hub=monitoring_hub,
     )
+    fault_monitor = FaultMonitor(
+        inventory=inventory, config_path=monitoring_config_path, data_dir=data_dir,
+        audit_path=audit_log_path, db_path=":memory:" if IS_VERCEL else Path(data_dir) / "monitoring.sqlite3",
+        reference_only=IS_VERCEL,
+    )
+    collection_workflow.result_listener = fault_monitor.consume
+    if executor is None:
+        command_executor.timeout_seconds = fault_monitor.settings["collection_timeout_seconds"]
+    protection = PortProtection(inventory, fault_monitor, backbone_neighbors_path)
     change_workflow = ChangeWorkflow(
         inventory=inventory,
         data_dir=data_dir,
         audit_log_path=change_audit_log_path,
         collection_workflow=collection_workflow,
-        write_executor=change_executor or PowerShellTelnetWriteExecutor(),
+        write_executor=change_executor or WRITE_EXECUTOR(),
         credential_resolver=credential_resolver,
         enable_credential_resolver=enable_credential_resolver,
         enabled=controlled_changes_enabled,
         approval_token=configured_approval_token,
+        protected_port_reason=protection.reason,
+        on_verified=fault_monitor.admin_change,
     )
 
     @asynccontextmanager
     async def lifespan(_app):
+        if not IS_VERCEL and (polling_enabled if polling_enabled is not None else os.environ.get("NETWORK_AI_POLLING") == "1"):
+            fault_monitor.start(collection_workflow.collect)
         try:
             yield
         finally:
+            fault_monitor.stop()
             collection_queue.shutdown()
 
     app = FastAPI(title="Network AI MVP", version="0.1.0", lifespan=lifespan)
+    app.state.fault_monitor = fault_monitor
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     def inventory_devices() -> list[Device]:
@@ -126,13 +151,35 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/", include_in_schema=False)
-    def index(): return FileResponse(STATIC_DIR / "index.html")
+    def index(): return FileResponse(STATIC_DIR / "fault-dashboard.html")
 
     @app.get("/operations", include_in_schema=False)
-    def operations(): return FileResponse(STATIC_DIR / "operations.html")
+    def operations(): return FileResponse(STATIC_DIR / "fault-dashboard.html")
 
     @app.get("/monitoring", include_in_schema=False)
-    def monitoring(): return FileResponse(STATIC_DIR / "monitoring.html")
+    def monitoring(): return FileResponse(STATIC_DIR / "fault-dashboard.html")
+
+    @app.get("/fault-monitor")
+    def fault_dashboard():
+        inventory_devices()
+        snapshot = fault_monitor.snapshot()
+        for row in snapshot["devices"]:
+            row["panel_ports"] = [
+                {key: port.get(key) for key in ("interface", "status", "speed")}
+                for port in row.pop("ports", [])
+            ]
+        return snapshot
+
+    @app.get("/fault-monitor/devices/{device_id}")
+    def fault_detail(device_id: str):
+        inventory_device(device_id)
+        snapshot = fault_monitor.snapshot()
+        row = next(d for d in snapshot["devices"] if d["device_id"] == device_id)
+        for port in row["ports"]:
+            port["protection_reason"] = protection.reason(device_id, port["interface"])
+        row["history"] = [h for h in snapshot["history"] if h["device_id"] == device_id]
+        row["change_capabilities"] = change_workflow.capabilities()
+        return row
 
     @app.get("/monitoring/latest")
     def monitoring_latest(): return monitoring_hub.latest()

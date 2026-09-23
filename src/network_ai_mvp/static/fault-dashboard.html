@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>네트워크 장애 감시 · Network AI MVP Monitoring</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/fault-dashboard.css?v=20260923-4" />
+    <link rel="stylesheet" href="/static/fault-panel.css?v=20260923-4" />
+    <script defer src="/static/fault-panel.js?v=20260923-2"></script>
+    <script defer src="/static/fault-dashboard.js?v=20260923-4"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="brand" href="/operations"
+        ><span class="brand-mark" aria-hidden="true">⌘</span
+        ><span>네트워크 장애 감시<small>전산팀 운영 콘솔</small></span></a
+      ><span id="runtimeState" class="runtime">상태 확인 중</span>
+    </header>
+    <main>
+      <section class="metrics" aria-label="장애 현황" id="metrics"></section>
+      <div id="connectionError" class="notice error" role="alert" hidden></div>
+      <section class="monitor-section" aria-labelledby="overviewTitle">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">건물별 감시 현황</p>
+            <h1 id="overviewTitle">스위치 패널 · 포트 현황</h1>
+          </div>
+          <p id="coverage" aria-live="polite">감시 상태를 확인하고 있습니다.</p>
+        </div>
+        <div id="scopeNotice" class="notice"></div>
+        <div class="panel-toolbar">
+          <label class="floor-filter" for="floorFilter"
+            >표시 범위<select id="floorFilter">
+              <option value="">전체 층</option>
+            </select></label
+          >
+          <div
+            class="port-legend"
+            aria-label="포트 상태 범례"
+            id="portLegend"
+          ></div>
+        </div>
+        <div id="buildings" aria-live="polite"></div>
+        <p id="collectionStatus" class="collection-note"></p>
+      </section>
+    </main>
+    <dialog id="deviceDialog" aria-labelledby="deviceTitle">
+      <header class="dialog-header">
+        <div>
+          <p id="deviceLocation" class="eyebrow"></p>
+          <h2 id="deviceTitle">장비 상세</h2>
+        </div>
+        <button
+          class="icon-button"
+          id="closeDetail"
+          aria-label="장비 상세 닫기"
+        >
+          ✕
+        </button>
+      </header>
+      <div id="detailBody" class="dialog-body"></div>
+    </dialog>
+    <dialog id="changeDialog" aria-labelledby="changeTitle">
+      <header class="dialog-header">
+        <h2 id="changeTitle">포트 변경 확인</h2>
+        <button
+          id="closeChange"
+          class="icon-button"
+          aria-label="포트 변경 닫기"
+        >
+          ✕
+        </button>
+      </header>
+      <form id="changeForm" class="dialog-body">
+        <p id="changeTarget"></p>
+        <p class="notice">
+          선택한 포트의 통신에 영향을 줍니다. 대상과 복구 명령을 확인하세요.
+        </p>
+        <h3>실행 명령</h3>
+        <pre id="changeCommands"></pre>
+        <h3>복구 명령</h3>
+        <pre id="rollbackCommands"></pre>
+        <label for="approvalCode">승인 코드</label
+        ><input id="approvalCode" type="password" required autocomplete="off" />
+        <p id="changeResult" role="status"></p>
+        <button class="danger-button" id="executeChange" type="submit">
+          승인 후 실행
+        </button>
+        <p class="muted">
+          실행 전후 상태를 확인합니다. 시작 설정에는 저장하지 않습니다.
+        </p>
+      </form>
+    </dialog>
+  </body>
+</html>

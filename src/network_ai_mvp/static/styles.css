@@ -1932,8 +1932,8 @@ tr.device-row.selected {
 }
 
 .interface-mac-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin: 0;
   padding: 0;
@@ -1941,15 +1941,20 @@ tr.device-row.selected {
 }
 
 .interface-mac-list li {
-  border: 1px solid var(--subtle);
+  max-width: 100%;
+  border: 1px solid #bfdbfe;
+  border-left: 3px solid var(--info);
   border-radius: 5px;
-  background: #f8fafc;
+  background: #eff6ff;
   padding: 5px 7px;
 }
 
 .interface-mac-list code {
-  color: var(--ink);
-  font-size: 11px;
+  color: #1e40af;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .ping-test-controls {

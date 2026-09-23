@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from threading import RLock
 from typing import Callable
 
 from ..audit import append_audit_event, new_audit_event, redact_text
@@ -55,8 +56,28 @@ class CollectionWorkflow:
         self.credential_resolver = credential_resolver
         self.collector_registry = collector_registry
         self.monitoring_hub = monitoring_hub
+        self.result_listener = None
+        self._device_locks = {}
+
+    def device_lock(self, device_id):
+        return self._device_locks.setdefault(device_id, RLock())
 
     def collect(self, device_id: str, purpose: str) -> dict[str, object]:
+        with self.device_lock(device_id):
+            return self._collect_and_notify(device_id, purpose)
+
+    def _collect_and_notify(self, device_id: str, purpose: str) -> dict[str, object]:
+        try:
+            response = self._collect(device_id, purpose)
+        except WorkflowError:
+            if self.result_listener:
+                self.result_listener({"device_id": device_id, "purpose": purpose, "success": False})
+            raise
+        if self.result_listener:
+            self.result_listener(response)
+        return response
+
+    def _collect(self, device_id: str, purpose: str) -> dict[str, object]:
         plan = self._build_plan_or_fail(device_id, purpose)
         self._require_supported(plan.device, device_id=device_id, purpose=purpose, action="read-only collect", plan=plan)
         credential_path = self._credential_or_fail(plan.device, device_id=device_id, purpose=purpose, plan=plan)
@@ -91,6 +112,23 @@ class CollectionWorkflow:
         return public_job_snapshot(snapshot)
 
     def check(self, device_id: str) -> dict[str, object]:
+        with self.device_lock(device_id):
+            return self._check_and_notify(device_id)
+
+    def _check_and_notify(self, device_id: str) -> dict[str, object]:
+        try:
+            response = self._check(device_id)
+        except WorkflowError:
+            if self.result_listener:
+                self.result_listener({"device_id": device_id, "purpose": "check", "success": False})
+            raise
+        if self.result_listener:
+            observation = response.get("observation") or {}
+            self.result_listener({**response, "device_id": device_id, "purpose": "check",
+                                  "parsed_ports": response.get("parsed_ports") or observation.get("ports") or []})
+        return response
+
+    def _check(self, device_id: str) -> dict[str, object]:
         device = self._device_or_fail(device_id)
         self._require_supported(device, device_id=device_id, purpose="check", action="one-click CHECK")
         purposes, plans = self._check_plans(device)

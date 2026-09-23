@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import json
 import subprocess
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -55,6 +56,8 @@ class ChangeWorkflow:
         enabled: bool,
         approval_token: str,
         proposal_ttl_seconds: int = 300,
+        protected_port_reason=None,
+        on_verified=None,
     ) -> None:
         self.inventory = inventory
         self.data_dir = Path(data_dir)
@@ -67,6 +70,8 @@ class ChangeWorkflow:
         self.approval_token = approval_token
         self.proposal_ttl_seconds = proposal_ttl_seconds
         self._proposals: dict[str, dict[str, object]] = {}
+        self.protected_port_reason = protected_port_reason
+        self.on_verified = on_verified
 
     def capabilities(self) -> dict[str, object]:
         return {
@@ -99,6 +104,7 @@ class ChangeWorkflow:
             raise ChangeWorkflowError(400, f"Unsupported desired state: {desired_state}")
         device = self._device(device_id)
         normalized_interface = short_interface_name(interface)
+        self._require_unprotected(device_id, normalized_interface)
         port = find_latest_port(self.data_dir, device.device_id, normalized_interface)
         if not port:
             raise ChangeWorkflowError(409, "No stored parsed port state is available. Run a live interfaces collection first.")
@@ -150,6 +156,16 @@ class ChangeWorkflow:
         }
 
     def execute(
+        self, *, proposal_id: str, approval_token: str,
+    ) -> dict[str, object]:
+        prepared = self._proposals.get(proposal_id)
+        proposal = prepared.get("proposal") if prepared else None
+        lock_factory = getattr(self.collection_workflow, "device_lock", None)
+        lock = lock_factory(proposal.device_id) if lock_factory and isinstance(proposal, LocalChangeProposal) else nullcontext()
+        with lock:
+            return self._execute(proposal_id=proposal_id, approval_token=approval_token)
+
+    def _execute(
         self,
         *,
         proposal_id: str,
@@ -173,12 +189,14 @@ class ChangeWorkflow:
         if not isinstance(proposal, LocalChangeProposal):
             raise ChangeWorkflowError(500, "Invalid in-memory proposal state.")
         desired_state = proposal.desired_state
+        self._require_unprotected(proposal.device_id, proposal.interface)
 
         precheck = self._collect_interfaces(proposal.device_id, phase="precheck")
         fresh_port = find_latest_port(self.data_dir, proposal.device_id, proposal.interface)
         if not fresh_port:
             raise ChangeWorkflowError(409, "Live precheck did not return the selected port.")
         self._require_eligible_port(fresh_port, desired_state=desired_state)
+        self._require_unprotected(proposal.device_id, proposal.interface)
 
         device = self._device(proposal.device_id)
         # A proposal is single-use before any write attempt. A timeout or transport
@@ -217,6 +235,8 @@ class ChangeWorkflow:
                 502,
                 "The command completed but the live postcheck did not confirm the requested admin state. Use the rollback plan and verify manually.",
             )
+        if self.on_verified:
+            self.on_verified(proposal.device_id, proposal.interface, desired_state)
         return {
             "proposal_id": proposal.proposal_id,
             "device_id": proposal.device_id,
@@ -259,6 +279,11 @@ class ChangeWorkflow:
     def _require_enabled(self) -> None:
         if not self.enabled:
             raise ChangeWorkflowError(403, "Controlled port changes are disabled for this runtime.")
+
+    def _require_unprotected(self, device_id, interface):
+        reason = self.protected_port_reason(device_id, interface) if self.protected_port_reason else None
+        if reason:
+            raise ChangeWorkflowError(409, reason)
 
     @staticmethod
     def _require_eligible_port(port: dict[str, object], *, desired_state: str) -> None:

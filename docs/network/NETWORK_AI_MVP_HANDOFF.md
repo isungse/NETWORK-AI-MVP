@@ -13,6 +13,18 @@ Target progression:
 3. Add approval-based change operations.
 4. Eventually support controlled network maintenance actions.
 
+## Pending Feature: Password-Based Port Control Unlock
+
+Status: requested, not implemented. Add a **포트 제어 잠금 해제** button that accepts a management password and enables port controls without restarting the local server for each use. Unlocking controls must not itself execute `shutdown` or `no shutdown`.
+
+Suggested interaction for implementation review: start locked → enter password → unlock only the requesting browser session → review the selected switch, port, and endpoint before confirming each change → lock manually or automatically. A 10-minute unlock period with a visible countdown is a proposed default, not a finalized requirement.
+
+Implementation considerations: validate the password and session expiry on the backend, store a password hash rather than plaintext, rate-limit failed attempts, protect state-changing requests against CSRF, and audit unlock/lock events separately from port changes. Do not enable every browser session through a global toggle. Retain the local-only deployment boundary and existing port eligibility, pre/post checks, rollback guidance, and running-configuration-only constraints in [the canonical architecture rules](../../.codex/rules/architecture.md#local-controlled-change-plane).
+
+The existing startup gate and per-action approval-code workflow remain the implemented behavior; see [Local Controlled Port Changes](../../README.md#local-controlled-port-changes). When implementing browser-session authorization, update that workflow and its canonical rules together, including how per-action approval is preserved. Keep actual passwords and approval codes out of this document and Git.
+
+Starting points: `src/network_ai_mvp/api.py` (`/change-capabilities`), `src/network_ai_mvp/services/change_workflow.py`, and `src/network_ai_mvp/static/app.js` (`portChangeEligibility`, `renderPortControl`, and the change dialog). Verify incorrect-password rejection, session isolation, expiry/manual locking, and continued protection of ineligible ports before enabling the new flow.
+
 ## Current Recommendation
 
 Use Python for the MVP.

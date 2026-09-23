@@ -1,0 +1,305 @@
+{
+  "settings": {
+    "interval_seconds": 120,
+    "stale_after_seconds": 600,
+    "failure_threshold": 3,
+    "recovery_threshold": 2,
+    "confirmation_spacing_seconds": 10,
+    "workers": 3,
+    "collection_timeout_seconds": 30
+  },
+  "devices": {
+    "cisco-backbone": {
+      "building": null,
+      "floor": null,
+      "location_source": null,
+      "uplinks": null,
+      "important_ports": null
+    },
+    "arista-10g-core": {
+      "building": null,
+      "floor": null,
+      "location_source": null,
+      "uplinks": [
+        {
+          "interface": "Et47",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        },
+        {
+          "interface": "Et48",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-4f-10g-1": {
+      "building": null,
+      "floor": "4F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "Et56/1",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-4f-10g-2": {
+      "building": null,
+      "floor": "4F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "Et56/1",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-1f-outpatient": {
+      "building": null,
+      "floor": null,
+      "location_source": null,
+      "uplinks": [
+        {
+          "interface": "Et52",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-2f-outpatient": {
+      "building": null,
+      "floor": null,
+      "location_source": null,
+      "uplinks": [
+        {
+          "interface": "Et52",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-3f": {
+      "building": null,
+      "floor": "3F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": null,
+      "important_ports": null
+    },
+    "arista-2f-1": {
+      "building": null,
+      "floor": "2F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "Et52",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-2f-2": {
+      "building": null,
+      "floor": "2F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "Et52",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-1f-1": {
+      "building": null,
+      "floor": "1F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "Et52",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-1f-2": {
+      "building": null,
+      "floor": "1F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "Et52",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-b1f-1": {
+      "building": null,
+      "floor": "B1F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "Et52",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-b1f-2": {
+      "building": null,
+      "floor": "B1F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "Et52",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "arista-b1f-3": {
+      "building": null,
+      "floor": "B1F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "Et52",
+          "source": "docs/network/arista-10g-network-20241030-learning-data.md",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "cisco-b2f-data": {
+      "building": null,
+      "floor": "B2F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "GigabitEthernet1/0/28",
+          "source": "inventory/backbone_neighbors.json",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "cisco-b1f-data": {
+      "building": null,
+      "floor": "B1F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "GigabitEthernet1/0/28",
+          "source": "inventory/backbone_neighbors.json",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "cisco-3f-data": {
+      "building": null,
+      "floor": "3F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "GigabitEthernet1/0/28",
+          "source": "inventory/backbone_neighbors.json",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "cisco-4f-data": {
+      "building": null,
+      "floor": "4F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "GigabitEthernet1/0/28",
+          "source": "inventory/backbone_neighbors.json",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "cisco-5f-data": {
+      "building": null,
+      "floor": "5F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "GigabitEthernet1/0/28",
+          "source": "inventory/backbone_neighbors.json",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "cisco-6f-data": {
+      "building": null,
+      "floor": "6F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "GigabitEthernet1/0/28",
+          "source": "inventory/backbone_neighbors.json",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "cisco-7f-data": {
+      "building": null,
+      "floor": "7F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "GigabitEthernet1/0/28",
+          "source": "inventory/backbone_neighbors.json",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "cisco-8f-data": {
+      "building": null,
+      "floor": "8F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "GigabitEthernet1/0/28",
+          "source": "inventory/backbone_neighbors.json",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    },
+    "cisco-9f-data": {
+      "building": null,
+      "floor": "9F",
+      "location_source": "docs/network/arista-10g-network-20241030-learning-data.md",
+      "uplinks": [
+        {
+          "interface": "GigabitEthernet1/0/28",
+          "source": "inventory/backbone_neighbors.json",
+          "impact": "해당 장비의 상위 연결 · 하위 영향 범위 미확인"
+        }
+      ],
+      "important_ports": null
+    }
+  }
+}

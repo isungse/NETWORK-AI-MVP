@@ -237,11 +237,15 @@ function text(value) {
 
 function appendFacts(container, rows) {
   const fragment = document.createDocumentFragment();
-  for (const [label, value] of rows) {
+  for (const [label, value, renderValue] of rows) {
     const term = document.createElement("dt");
     term.textContent = label;
     const description = document.createElement("dd");
-    description.textContent = text(value);
+    if (renderValue) {
+      description.append(renderValue(value));
+    } else {
+      description.textContent = text(value);
+    }
     fragment.append(term, description);
   }
   container.append(fragment);
@@ -1907,7 +1911,7 @@ function renderPortDetail(port, message = "Search for a port, IP, MAC, or device
     ["Description", port.description],
     ["Endpoint IPs", listText(port.endpoint_ips)],
     ["Interface MAC Diagnosis", macDiagnostic.message],
-    [`Learned Interface MACs (${macDiagnostic.count})`, listText(macDiagnostic.macs)],
+    [`Learned Interface MACs (${macDiagnostic.count})`, macDiagnostic.macs, createInterfaceMacList],
     ["Neighbor", port.neighbor_name],
     ["Neighbor IP", port.neighbor_ip],
     ["Neighbor Platform", port.neighbor_platform],
@@ -2131,16 +2135,7 @@ function renderPortAuxiliaryDetail(port) {
     heading.textContent = `Learned Interface MACs (${macDiagnostic.count})`;
     evidence.append(heading);
     if (macDiagnostic.macs.length) {
-      const macList = document.createElement("ul");
-      macList.className = "interface-mac-list";
-      for (const mac of macDiagnostic.macs) {
-        const item = document.createElement("li");
-        const code = document.createElement("code");
-        code.textContent = mac;
-        item.append(code);
-        macList.append(item);
-      }
-      evidence.append(macList);
+      evidence.append(createInterfaceMacList(macDiagnostic.macs));
     } else {
       const empty = document.createElement("p");
       empty.className = "muted";
@@ -2283,7 +2278,7 @@ function renderConnectionDiagnostic(payload) {
       : "No complete Physical Link/Line Protocol Up sequence in this window"],
     ["VLAN / Mode", `${text(port.vlan)} / ${portMode(port)}`],
     ["Endpoint IP", listText(payload.endpoint_ips)],
-    ["Learned Interface MACs", listText(macDiagnostic.macs)],
+    ["Learned Interface MACs", macDiagnostic.macs, createInterfaceMacList],
     ["MAC Diagnosis", macDiagnostic.message],
     ["Port Errors", payload.total_errors || 0],
     ["Last Link Event", lastEvent ? `${formatObservedAt(lastEvent.timestamp)} · ${lastEvent.event.toUpperCase()} ${lastEvent.state.toUpperCase()}` : "No stored LINK/LINEPROTO event"],
@@ -2394,6 +2389,22 @@ async function diagnoseSelectedPort() {
   await loadCommandPlan();
   renderSummary("Connection diagnostic preview loaded. Review the target port and read-only commands before running diagnostics.", "warn");
   activateDetailTab("diagnostics");
+}
+
+function createInterfaceMacList(macs) {
+  if (!Array.isArray(macs) || !macs.length) {
+    return document.createTextNode("-");
+  }
+  const list = document.createElement("ul");
+  list.className = "interface-mac-list";
+  for (const mac of macs) {
+    const item = document.createElement("li");
+    const code = document.createElement("code");
+    code.textContent = mac;
+    item.append(code);
+    list.append(item);
+  }
+  return list;
 }
 
 function listText(values) {

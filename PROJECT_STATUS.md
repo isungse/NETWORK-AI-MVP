@@ -2,15 +2,17 @@
 
 ## Goal
 
-Provide a network operations console that inventories devices, runs allowlisted diagnostics, stores redacted observations, presents actionable port, endpoint, topology, and health information, and supports narrowly controlled local port isolation and recovery.
+Provide an IT fault-monitoring console that prioritizes designated uplink failures, device communication outages, and important-port failures by building and floor. Preserve collection evidence, incident history, and protected local port isolation and recovery in device details.
 
 ## Implemented Capabilities
 
 - CSV-backed Cisco and Arista inventory with logical credential references.
 - Read-only command plans enforced by backend policy.
-- Windows PowerShell Telnet collection for explicitly configured legacy devices.
+- Windows PowerShell and native Linux Telnet collection for explicitly configured legacy devices, using the same policies and parsers.
 - Local redacted raw and parsed observation storage.
-- Device dashboard, inventory, topology, Port Matrix, endpoint search, diagnostics, audit, and monitoring views.
+- Korean fault-monitoring home organized by explicit building, floor, and device scope, with visible switch panels, labeled port states, floor selection, and direct port detail navigation.
+- Configurable local periodic interface collection, stale/failure handling, confirmed incidents, recovery history, and persistent monitoring state.
+- Device detail contains monitored uplinks, important ports, optional port layout, MAC evidence, and protected port controls. Legacy collection/query APIs and observations remain available.
 - Port status, VLAN, speed/duplex, error-counter, MAC, ARP, and neighbor correlation.
 - Per-interface MAC diagnostics that distinguish learned MACs, no learned entry, down-port state, and missing MAC-table collection evidence.
 - Chassis-aware backbone faceplate rendering with confirmed slot, module type, model, port count, and serial reference metadata.
@@ -26,13 +28,17 @@ Provide a network operations console that inventories devices, runs allowlisted 
 - Local collection results are not automatically synchronized to Vercel.
 - Production reference snapshots are not a live feed.
 - Confirmed physical faceplate metadata is model-specific; devices without explicit module evidence use logical port ordering and must not imply an unverified chassis layout.
-- Collection is manual; there is no persistent scheduler or polling service.
+- Ubuntu on-premises runtime supports systemd boot startup and process recovery, Nginx access, encrypted systemd credentials, and a single polling worker. Windows automatic startup is not installed.
+- Building names, important-port lists, and some device locations/uplinks still require operator confirmation. Missing configuration is shown as unknown, not healthy.
+- No power-sensor data is collected; transport unreachability cannot establish power loss.
 - The active collector uses Telnet and should be migrated to a secure transport.
 - The API does not yet provide complete operator authentication and authorization for shared on-premises use.
 - Controlled changes use a local approval code without per-user identity attribution; production-grade RBAC and an external identity provider remain required before shared multi-user deployment.
-- JSON and JSONL persistence is suitable for the MVP but not for concurrent production polling.
+- Monitoring incident state uses local SQLite; raw observations and audits still use JSON/JSONL. Multi-process polling and shared production storage remain unsupported.
 
 ## Runtime Guidance
+
+Monitoring configuration, classification, and reproducible validation: [Fault monitoring guide](docs/network/FAULT_MONITORING.md).
 
 The canonical runtime boundary is documented in [`.codex/rules/architecture.md`](.codex/rules/architecture.md).
 
