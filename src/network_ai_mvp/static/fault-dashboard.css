@@ -116,6 +116,12 @@ select {
   color: var(--muted);
   font-size: 14px;
 }
+.runtime.active {
+  background: #eaf6ef;
+  color: #206748;
+  border-color: #bfdfcc;
+  font-weight: 700;
+}
 main {
   max-width: 1516px;
   padding: 28px;
@@ -123,7 +129,7 @@ main {
 }
 .metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(110px, 1fr)) minmax(190px, 1.4fr);
+  grid-template-columns: repeat(4, minmax(110px, 1fr)) minmax(190px, 1.4fr);
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -587,6 +593,9 @@ pre {
 @media (max-width: 1050px) {
   .metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .metric.time {
+    grid-column: span 2;
   }
   .metric:nth-child(3) {
     border-right: 0;

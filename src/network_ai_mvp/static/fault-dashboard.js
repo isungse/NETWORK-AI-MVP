@@ -2,7 +2,7 @@
 const $ = (selector) => document.querySelector(selector);
 const LABELS = {
   critical: "중대 장애",
-  unknown: "상태 확인 불가",
+  unknown: "미확인",
   pending: "재확인 중",
   normal: "정상",
   maintenance: "관리자 비활성",
@@ -327,10 +327,8 @@ function renderSwitchPanel(d) {
       `${d.management_ip} · ${d.platform} · ${locationText(d)}`,
     ),
   );
-  status.append(
-    badge(d.status),
-    node("span", "panel-time", `확인 ${time(d.checked_at)}`),
-  );
+  if (d.status !== "unknown") status.append(badge(d.status));
+  status.append(node("span", "panel-time", `확인 ${time(d.checked_at)}`));
   head.append(identity, status);
   card.append(head);
   const layout = FaultPanel.groups(d),
@@ -493,12 +491,15 @@ function renderDashboard(data) {
       ["업링크 장애 수", "uplink_faults"],
       ["장비 작동 불능 수", "device_unreachable"],
       ["중요 포트 장애 수", "important_faults"],
-      ["상태 확인 불가 수", "unknown_devices"],
       ["마지막 확인 시각", "last_checked", "time"],
     ].map(([label, key, type]) => metric(label, data.metrics[key], type, key)),
   );
-  $("#runtimeState").textContent = data.reference_only
+  const runtime = $("#runtimeState");
+  runtime.classList.toggle("active", !data.reference_only && data.scheduler.enabled && !data.scheduler.error);
+  runtime.textContent = data.reference_only
     ? "참고 데이터 · 실시간 확인 불가"
+    : data.scheduler.error
+      ? "자동 감시 오류"
     : data.scheduler.enabled
       ? "● 자동 감시 중"
       : "자동 수집 중지";
@@ -637,6 +638,7 @@ async function refresh() {
     $("#connectionError").textContent =
       "감시 서버에 연결할 수 없습니다. 현재 상태 확인 불가 · " + error.message;
     $("#runtimeState").textContent = "서버 연결 끊김";
+    $("#runtimeState").classList.remove("active");
     $("#recentConnectionList").replaceChildren(node("p", "notice error", "서버 연결을 복구하면 최근 연결 이력을 다시 확인합니다."));
     $("#metrics")
       .querySelectorAll(".metric-value")
@@ -791,7 +793,7 @@ function renderDetail(d) {
   const facts = node("dl", "facts");
   facts.append(
     fact("관리 IP", d.management_ip),
-    fact("감시 상태", LABELS[d.status]),
+    ...(d.status !== "unknown" ? [fact("감시 상태", LABELS[d.status])] : []),
     fact("건물 · 층", locationText(d)),
     fact("마지막 정상 확인", time(d.last_healthy_at)),
     fact("마지막 수집 성공", time(d.last_success_at)),
