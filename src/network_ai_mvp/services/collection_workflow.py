@@ -269,6 +269,7 @@ class CollectionWorkflow:
             "stderr": redact_text(stderr),
             "error_summary": error_summary,
             "observation_stored": observation is not None,
+            "collected_at": observation.get("timestamp") if observation else None,
             "parsed_summary": observation.get("summary") if observation else {},
             "parsed_ports": observation.get("ports") if observation else [],
             "interface_findings": build_interface_findings(observation.get("ports") if observation else []),

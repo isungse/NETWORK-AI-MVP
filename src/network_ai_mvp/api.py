@@ -19,6 +19,7 @@ from .neighbors import get_neighbors_for_device
 from .observations import find_latest_port, read_latest_observation, read_latest_port_observation
 from .port_diagnostics import build_port_connection_diagnostic, build_recent_link_diagnostic, ping_target
 from .policy import CommandPolicyError, allowed_purposes, build_command_plan
+from .parsers import short_interface_name
 from .search import search_network_state
 from .services.collection import public_command_plan, public_device, public_job_snapshot
 from .services.collection_workflow import CollectionWorkflow, WorkflowError
@@ -183,6 +184,15 @@ def create_app(
 
     @app.get("/monitoring/latest")
     def monitoring_latest(): return monitoring_hub.latest()
+
+    @app.get("/fault-monitor/devices/{device_id}/ports/{interface:path}/connections")
+    def port_connections(device_id: str, interface: str):
+        inventory_device(device_id)
+        with fault_monitor.lock:
+            events = fault_monitor.connections.history(device_id, short_interface_name(interface))
+        return {"device_id": device_id, "interface": short_interface_name(interface),
+                "events": events, "limit": 100, "retention_days": 30,
+                "reference_only": fault_monitor.reference_only}
 
     @app.get("/events/monitoring", include_in_schema=False)
     def monitoring_events(): return StreamingResponse(monitoring_hub.event_stream(), media_type="text/event-stream")

@@ -180,6 +180,43 @@ class FaultMonitorTests(unittest.TestCase):
         probe.assert_not_called()
         self.assertEqual(self.monitor.db.execute("SELECT COUNT(*) FROM devices").fetchone()[0], 0)
 
+    def test_recent_connections_baseline_failures_gaps_and_restart(self):
+        self.assertEqual(self.record()["devices"][0]["recent_connections"], {})
+        changed = self.record(unused="connected")
+        event = changed["devices"][0]["recent_connections"]["Et8"]
+        self.assertEqual(event["source"], "observation")
+        self.assertEqual(event["connection_count"], 1)
+        self.assertEqual(self.new_monitor().snapshot(self.at)["devices"][0]["recent_connections"]["Et8"]["connection_count"], 1)
+        self.record(success=False, reachable=False)
+        self.record(unused="notconnect")
+        self.assertEqual(len(self.monitor.connections.history("test-switch", "Et8")), 1)
+        self.at += timedelta(seconds=601)
+        self.record(unused="connected")
+        self.assertEqual(len(self.monitor.connections.history("test-switch", "Et8")), 1)
+
+    def test_log_only_collection_cannot_refresh_health(self):
+        self.record()
+        before = self.monitor.snapshot(self.at)["metrics"]["last_checked"]
+        self.monitor.consume({"device_id": "test-switch", "purpose": "security-logs", "success": True,
+                              "stdout": "", "collected_at": stamp(self.at)})
+        self.assertEqual(self.monitor.snapshot(self.at)["metrics"]["last_checked"], before)
+        with patch.object(self.monitor, "probe") as probe:
+            self.monitor.consume({"device_id": "test-switch", "purpose": "connection-events", "success": False,
+                                  "collected_at": stamp(self.at)})
+        probe.assert_not_called()
+        self.assertEqual(self.monitor.snapshot(self.at)["metrics"]["last_checked"], before)
+        self.assertFalse(self.monitor.connections.log_status("test-switch")["success"])
+
+    def test_poll_collects_connection_logs_after_successful_interface_check(self):
+        calls = []
+        def collect(device_id, purpose):
+            calls.append((device_id, purpose))
+            if purpose == "connection-events":
+                self.monitor.stop_event.set()
+            return {"success": True}
+        self.monitor._poll(collect)
+        self.assertEqual(calls, [("test-switch", "interfaces"), ("test-switch", "connection-events")])
+
     def test_api_configuration_protects_access_vlan_uplink(self):
         neighbors = self.root / "neighbors.json"
         neighbors.write_text("[]", encoding="utf-8")

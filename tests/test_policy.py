@@ -59,6 +59,13 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaises(CommandPolicyError):
             validate_commands("arista", ["configure terminal"])
 
+    def test_connection_events_collect_clock_and_logs_without_configuration_commands(self):
+        for vendor in ("cisco", "arista"):
+            device = next(d for d in load_devices("inventory/devices.csv") if d.vendor == vendor)
+            plan = build_command_plan(device, "connection-events")
+            self.assertTrue(plan.read_only)
+            self.assertEqual(plan.commands, ("terminal length 0", "show clock", "show logging"))
+
     def test_rejects_unlisted_show_command(self) -> None:
         with self.assertRaises(CommandPolicyError):
             validate_commands("cisco", ["show running-config"])

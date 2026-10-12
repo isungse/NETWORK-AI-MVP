@@ -101,6 +101,93 @@ function post(path, body) {
     body: JSON.stringify(body),
   });
 }
+function elapsed(seconds) {
+  if (seconds < 60) return "방금";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}분 전`;
+  return `${Math.floor(seconds / 3600)}시간 전`;
+}
+function connectionEvidence(event) {
+  if (event.source === "observation")
+    return `상태 변화로 발견 · ${time(event.interval_start)} 이후~${time(event.at || event.connected_at)} 사이`;
+  if (event.source === "device_log_unverified")
+    return `장비 로그 · 시계 보정 불가 · 장비 시각 ${time(event.device_at)}`;
+  const correction = Math.abs(event.clock_offset_seconds || 0) >= 30
+    ? ` · 장비 시각 ${time(event.device_at)} · 시계 차이 약 ${Math.round(Math.abs(event.clock_offset_seconds) / 60)}분 보정`
+    : "";
+  return `연결 로그 · 서버 시각 기준(수집 지연 오차 포함)${correction}`;
+}
+function markRecentConnection(button, device, port) {
+  const connection = FaultPanel.portView(device, port).connection;
+  if (!connection) return;
+  button.classList.add("recent-connection");
+  const label = connection.repeated ? "반복" : "NEW";
+  const marker = node("span", "connection-marker", label);
+  marker.setAttribute("aria-hidden", "true");
+  button.append(marker);
+  const description = `최근 24시간 연결 · ${time(connection.connected_at)} · ${elapsed(connection.age_seconds)} · ${connection.connection_count}회 · ${connectionEvidence(connection)}`;
+  button.title += ` · ${description}`;
+  button.setAttribute("aria-label", `${button.getAttribute("aria-label")} · ${description}`);
+}
+function renderRecentConnections(data) {
+  const rows = [];
+  for (const d of data.devices) {
+    if (floorFilter && JSON.stringify([d.building || "건물 미설정", d.floor || "층 미설정"]) !== floorFilter) continue;
+    for (const event of Object.values(d.recent_connections || {})) rows.push({ d, event });
+  }
+  rows.sort((a, b) => b.event.connected_at.localeCompare(a.event.connected_at));
+  $("#recentConnectionSummary").textContent = `최근 24시간 연결 포트 · ${rows.length}개${floorFilter ? " · 선택한 층" : " · 전체 장비"}`;
+  const root = $("#recentConnectionList");
+  root.replaceChildren();
+  if (!rows.length) {
+    root.append(node("p", "muted", data.reference_only
+      ? "참고 데이터에서는 최근 연결을 표시하지 않습니다."
+      : "확인된 최근 연결 이력이 없습니다. 처음 수집한 연결 상태는 새 연결로 간주하지 않습니다."));
+  } else {
+    const wrap = node("div", "table-scroll connection-table-scroll"), table = node("table", "port-table");
+    const head = node("tr");
+    for (const label of ["장비 · 위치", "포트", "연결 시각 · 근거", "현재 상태", "24시간 연결 횟수"]) head.append(node("th", "", label));
+    const thead = node("thead"); thead.append(head); table.append(thead);
+    const body = node("tbody");
+    for (const { d, event } of rows) {
+      const row = node("tr"), identity = node("td", "", `${d.hostname} · ${locationText(d)}`), target = node("td");
+      const link = node("button", "target-chip recent-connection", event.interface);
+      link.onclick = () => openDevice(d.device_id, event.interface);
+      target.append(link);
+      const when = node("td", "", `${time(event.connected_at)} · ${elapsed(event.age_seconds)}`);
+      when.append(node("small", "connection-evidence", connectionEvidence(event)));
+      const port = (d.panel_ports || d.ports || []).find((p) => FaultPanel.shortName(p.interface) === event.interface);
+      row.append(identity, target, when,
+        node("td", "", d.port_data_current && port ? portStatus(port.status) : "현재 상태 미확인"),
+        node("td", "", `${event.connection_count}회${event.repeated ? " · 반복 연결 확인 필요" : ""}`));
+      body.append(row);
+    }
+    table.append(body); wrap.append(table); root.append(wrap);
+  }
+  const unavailable = data.devices.filter((d) => {
+    const status = d.connection_log_status;
+    return !status?.success || !status.clock_verified ||
+      Date.parse(data.generated_at) - Date.parse(status.checked_at) > data.settings.stale_after_seconds * 1000;
+  }).length;
+  if (unavailable && !data.reference_only)
+    root.append(node("p", "muted", `${unavailable}대의 연결 로그 또는 장비 시각 근거가 없거나 오래되었습니다. 상태 수집 사이의 짧은 연결·해제는 누락될 수 있습니다.`));
+}
+async function loadConnectionHistory(deviceId, interfaceName, root) {
+  try {
+    const result = await api(`/fault-monitor/devices/${encodeURIComponent(deviceId)}/ports/${encodeURIComponent(interfaceName)}/connections`);
+    if (!root.isConnected) return;
+    root.replaceChildren(node("h4", "", "연결 · 해제 이력"));
+    if (result.reference_only) root.append(node("p", "muted", "참고 데이터 · 실시간 이력 확인 불가"));
+    for (const event of result.events) {
+      const row = node("p", "connection-history-item", `${time(event.at)} · ${event.state === "up" ? "연결" : "연결 해제"}`);
+      row.append(node("small", "connection-evidence", connectionEvidence(event)));
+      root.append(row);
+    }
+    if (!result.events.length) root.append(node("p", "muted", "기록된 연결·해제 이력이 없습니다. 최초 연결 상태만으로 연결 시각을 추정하지 않습니다."));
+    root.append(node("p", "muted", `최근 ${result.limit}건 · ${result.retention_days}일 보관 · 연결자 신원은 별도 자산·인증 정보 필요`));
+  } catch (error) {
+    if (root.isConnected) root.replaceChildren(node("p", "notice error", `연결 이력을 확인하지 못했습니다: ${error.message}`));
+  }
+}
 function deviceButton(device) {
   const b = node("button", "device-link", device.hostname);
   b.onclick = () => openDevice(device.device_id);
@@ -196,6 +283,7 @@ function renderSwitchPanel(d) {
         if (view.roles.includes("업링크")) number.append(uplinkArrow());
         if (view.roles.includes("중요")) number.append(node("span", "port-role", "★"));
         button.append(number, portSymbol());
+        markRecentConnection(button, d, item.port);
         button.onclick = () => openDevice(d.device_id, view.name);
         grid.append(button);
       }
@@ -389,7 +477,9 @@ function renderDashboard(data) {
     }),
     uplinkArrow(),
     node("span", "role-legend", "업링크 · ★ 중요"),
+    node("span", "connection-legend", "NEW 청록 테두리 · 최근 24시간 연결"),
   );
+  renderRecentConnections(data);
   for (const [name, floors] of buildings) {
     if (floorFilter && JSON.parse(floorFilter)[0] !== name) continue;
     const building = node("section", "building"),
@@ -452,6 +542,7 @@ async function refresh() {
     $("#connectionError").textContent =
       "감시 서버에 연결할 수 없습니다. 현재 상태 확인 불가 · " + error.message;
     $("#runtimeState").textContent = "서버 연결 끊김";
+    $("#recentConnectionList").replaceChildren(node("p", "notice error", "서버 연결을 복구하면 최근 연결 이력을 다시 확인합니다."));
     $("#metrics")
       .querySelectorAll(".metric-value")
       .forEach((n) => (n.textContent = "확인 불가"));
@@ -704,6 +795,7 @@ function renderDetail(d) {
               : "미감시";
       button.setAttribute("aria-label", `${p.interface} · ${label}`);
       button.title = `${p.interface} · ${label} · ${p.speed || "속도 미확인"}`;
+      markRecentConnection(button, d, p);
       button.onclick = () => selectPort(p, button);
       grid.append(button);
     }
@@ -789,6 +881,10 @@ function selectPort(port, button) {
   );
   for (const mac of port.endpoint_macs || [])
     box.append(node("code", "mac", mac));
+  const connectionHistory = node("section", "connection-history");
+  connectionHistory.append(node("p", "muted", "연결 이력 확인 중…"));
+  box.append(connectionHistory);
+  loadConnectionHistory(selectedDevice.device_id, port.interface, connectionHistory);
   const disabled = ["disabled", "administratively down", "admin-down"].includes(
     port.status,
   );

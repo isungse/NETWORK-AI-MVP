@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>네트워크 장애 감시 · Network AI MVP Monitoring</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="/static/fault-dashboard.css?v=20260923-8" />
-    <link rel="stylesheet" href="/static/fault-panel.css?v=20260923-8" />
-    <script defer src="/static/fault-panel.js?v=20260923-8"></script>
-    <script defer src="/static/fault-dashboard.js?v=20260923-8"></script>
+    <link rel="stylesheet" href="/static/fault-dashboard.css?v=20261012-1" />
+    <link rel="stylesheet" href="/static/fault-panel.css?v=20261012-1" />
+    <script defer src="/static/fault-panel.js?v=20261012-1"></script>
+    <script defer src="/static/fault-dashboard.js?v=20261012-1"></script>
   </head>
   <body>
     <header class="app-header">
@@ -41,6 +41,11 @@
             id="portLegend"
           ></div>
         </div>
+        <details class="recent-connections" id="recentConnections">
+          <summary id="recentConnectionSummary">최근 24시간 연결 포트</summary>
+          <p class="muted">청록색 테두리와 NEW는 최근 연결 이력입니다. 현재 상태는 기존 색상으로 구분합니다. 연결자 신원은 확인하지 않습니다.</p>
+          <div id="recentConnectionList"></div>
+        </details>
         <div id="buildings" aria-live="polite"></div>
         <p id="collectionStatus" class="collection-note"></p>
       </section>

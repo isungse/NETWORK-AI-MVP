@@ -12,6 +12,7 @@ class CommandPolicyError(ValueError):
 
 READ_ONLY_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
     "cisco": {
+        "connection-events": ("terminal length 0", "show clock", "show logging"),
         "baseline": (
             "terminal length 0",
             "show version",
@@ -71,6 +72,7 @@ READ_ONLY_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
         ),
     },
     "arista": {
+        "connection-events": ("terminal length 0", "show clock", "show logging"),
         "baseline": (
             "terminal length 0",
             "show hostname",

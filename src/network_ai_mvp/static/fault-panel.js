@@ -76,7 +76,8 @@ const FaultPanel = (() => {
     const roles = [];
     if (metrics.some((p) => p.kind === "uplink")) roles.push("업링크");
     if (metrics.some((p) => p.kind === "important")) roles.push("중요");
-    return { name, state, ...states[state], roles, metric };
+    const connection = device.recent_connections?.[name] || null;
+    return { name, state, ...states[state], roles, metric, connection };
   }
   function groups(device) {
     const ports = [...(device.panel_ports || device.ports || [])];

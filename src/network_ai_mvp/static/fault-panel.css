@@ -387,3 +387,29 @@ main {
   color: #713b12;
 }
 .panel-footer, .panel-time, .module-label { color: #43536a; }
+
+/* Recent activity is an additional marker; fault/slow/unknown fills retain meaning. */
+.socket.recent-connection, .port-tile.recent-connection {
+  outline: 2px solid #007e89;
+  outline-offset: 1px;
+}
+.socket.recent-connection:focus-visible, .port-tile.recent-connection:focus-visible {
+  box-shadow: 0 0 0 5px #243b53;
+}
+.connection-marker {
+  display: inline-block;
+  background: #006d77;
+  color: #fff;
+  font: 700 10px/14px system-ui, sans-serif;
+  padding: 0 3px;
+  border-radius: 2px;
+}
+.socket .connection-marker { position: absolute; bottom: -3px; right: -3px; font-size: 8px; line-height: 11px; }
+.port-tile .connection-marker { margin-left: 5px; }
+.connection-legend { color: #006d77; border: 2px solid #007e89; padding: 2px 5px; font-size: 13px; }
+.recent-connections { margin: 16px 0; padding: 14px; border: 1px solid #b5d5d8; border-radius: 8px; background: #fff; }
+.recent-connections > summary { cursor: pointer; font-size: 16px; font-weight: 700; color: #155e66; }
+.connection-table-scroll { max-height: 300px; }
+.connection-table-scroll th { position: sticky; top: 0; background: #f4f8fa; }
+.connection-evidence { display: block; margin-top: 4px; color: #43536a; font-size: 13px; font-weight: 400; white-space: normal; }
+.connection-history-item { border-bottom: 1px solid #e0e8ed; padding: 7px 0; }

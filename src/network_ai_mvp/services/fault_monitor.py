@@ -15,6 +15,7 @@ from ..audit import read_audit_events
 from ..observations import read_latest_port_observation
 from ..inventory import InventoryError
 from ..parsers import short_interface_name
+from .port_connections import PortConnections
 
 LOG = logging.getLogger(__name__)
 UP = {"connected", "up"}
@@ -122,6 +123,7 @@ class FaultMonitor:
                 saved.backup(self.db)
         self.db.execute("CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS incidents (id INTEGER PRIMARY KEY, device TEXT, metric TEXT, kind TEXT, interface TEXT, first_seen TEXT, confirmed_at TEXT, last_checked TEXT, recovered_at TEXT, ended_reason TEXT)")
+        self.connections = PortConnections(self.db)
         self.db.commit()
         try:
             self._bootstrap(audit_path)
@@ -138,6 +140,7 @@ class FaultMonitor:
     def _bootstrap(self, audit_path):
         # Imported snapshots are a single observation, never fabricated repeated checks.
         audits = read_audit_events(audit_path, limit=5000)
+        imported_logs = False
         for device in self.inventory.list_devices():
             observation = read_latest_port_observation(self.data_dir, device.device_id)
             state = self._state(device.device_id)
@@ -151,10 +154,26 @@ class FaultMonitor:
                     (instant(latest_failure.get("timestamp")) or datetime.min.replace(tzinfo=UTC)) >
                     (instant(state.get("checked_at")) or datetime.min.replace(tzinfo=UTC))):
                 self.record(device.device_id, success=False, at=latest_failure["timestamp"], source="stored")
+            # Import bounded recent log-bearing snapshots once, not on page views.
+            raw_dir = self.data_dir / "raw" / device.device_id
+            candidates = sorted(p for p in raw_dir.glob("*.json") if any(
+                purpose in p.name for purpose in ("connection-events", "link-diagnostics", "security-logs")))
+            with self.lock, self.db:
+                for path in candidates[-32:]:
+                    try:
+                        payload = json.loads(path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        continue
+                    if isinstance(payload, dict) and payload.get("success"):
+                        self.connections.consume_logs(device.device_id, str(payload.get("stdout") or ""), payload.get("timestamp"))
+                        imported_logs = True
+        if imported_logs:
+            self._persist()
 
     def consume(self, response):
         # Endpoint/topology-only results cannot refresh interface health.
-        if response.get("purpose") not in {"interfaces", "baseline", "check", "port-endpoints", "link-diagnostics"}:
+        purpose = response.get("purpose")
+        if purpose not in {"interfaces", "baseline", "check", "port-endpoints", "link-diagnostics", "connection-events", "security-logs"}:
             return
         device_id = response["device_id"]
         try:
@@ -164,9 +183,21 @@ class FaultMonitor:
             return
         success = bool(response.get("success"))
         reachable = None
-        if not success and not self.reference_only:
+        log_only = purpose in {"security-logs", "connection-events"}
+        if not success and not self.reference_only and not log_only:
             reachable = self.probe(device)
-        self.record(device_id, success=success, ports=response.get("parsed_ports") or [], reachable=reachable)
+        at = response.get("collected_at") or stamp()
+        if not instant(at):
+            return
+        if not log_only:
+            # Stored observation timestamps have second precision; receipt time keeps
+            # rapid failure -> success attempts in their actual order.
+            self.record(device_id, success=success, ports=response.get("parsed_ports") or [], reachable=reachable)
+        if purpose in {"connection-events", "link-diagnostics", "security-logs"}:
+            with self.lock, self.db:
+                self.connections.consume_logs(device_id, str(response.get("stdout") or ""), at, success)
+                self.connections.prune(instant(at))
+            self._persist()
 
     def _values(self, device_id, state):
         cfg = self.config["devices"].get(device_id, {})
@@ -217,6 +248,11 @@ class FaultMonitor:
                 return
             # A gap breaks both failure and recovery streaks, but never resolves an incident.
             gap = not previous or (when - previous).total_seconds() > self.settings["stale_after_seconds"]
+            if success and source == "live" and not self.reference_only:
+                self.connections.observe(device_id, state.get("ports", []), ports or [],
+                                         state.get("checked_at"), at,
+                                         not gap and bool(state.get("success")))
+                self.connections.prune(when)
             state.update(checked_at=at, success=bool(success), reachable=reachable, source=source)
             if success:
                 state["ports"] = ports or []
@@ -286,6 +322,7 @@ class FaultMonitor:
         now = now or datetime.now(UTC)
         devices = []
         with self.lock:
+            recent_connections = self.connections.snapshot(now) if not self.reference_only else {}
             for device in self.inventory.list_devices():
                 state = self._state(device.device_id)
                 cfg = self.config["devices"].get(device.device_id, {})
@@ -336,6 +373,8 @@ class FaultMonitor:
                                 "last_healthy_at": state.get("last_healthy_at") if not missing else None,
                                 "stale": stale or self.reference_only,
                                 "port_data_current": not stale and not self.reference_only and bool(state.get("success")) and current_values["device"]["raw"] == "ok",
+                                "recent_connections": recent_connections.get(device.device_id, {}),
+                                "connection_log_status": self.connections.log_status(device.device_id),
                                 "ports": state.get("ports", []), "config": cfg})
             rows = self.db.execute("SELECT device,kind,interface,first_seen,confirmed_at,last_checked,recovered_at,ended_reason FROM incidents ORDER BY id DESC LIMIT 300").fetchall()
         devices.sort(key=lambda d: ({"critical": 0, "unknown": 1, "normal": 2}[d["status"]], d["hostname"]))
@@ -365,7 +404,10 @@ class FaultMonitor:
             if self.stop_event.is_set():
                 return
             try:
-                collect(device.device_id, "interfaces")
+                result = collect(device.device_id, "interfaces")
+                if result.get("success") and not self.stop_event.is_set():
+                    # Log permissions/failures must not invalidate a successful interface check.
+                    collect(device.device_id, "connection-events")
             except Exception:
                 LOG.exception("Scheduled collection failed for %s", device.device_id)
         while not self.stop_event.is_set():
