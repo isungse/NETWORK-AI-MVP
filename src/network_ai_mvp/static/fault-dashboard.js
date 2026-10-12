@@ -121,7 +121,7 @@ function markRecentConnection(button, device, port) {
   if (!connection) return;
   button.classList.add("recent-connection");
   const label = connection.repeated ? "반복" : "NEW";
-  const marker = node("span", "connection-marker", label);
+  const marker = node("span", `connection-marker${connection.repeated ? "" : " connection-marker-new"}`, label);
   marker.setAttribute("aria-hidden", "true");
   button.append(marker);
   const description = `최근 24시간 연결 · ${time(connection.connected_at)} · ${elapsed(connection.age_seconds)} · ${connection.connection_count}회 · ${connectionEvidence(connection)}`;
@@ -477,7 +477,11 @@ function renderDashboard(data) {
     }),
     uplinkArrow(),
     node("span", "role-legend", "업링크 · ★ 중요"),
-    node("span", "connection-legend", "NEW 청록 테두리 · 최근 24시간 연결"),
+    (() => {
+      const legend = node("span", "connection-legend");
+      legend.append(node("span", "connection-marker connection-marker-new", "NEW"), " 청록 테두리 · 최근 24시간 연결");
+      return legend;
+    })(),
   );
   renderRecentConnections(data);
   for (const [name, floors] of buildings) {
