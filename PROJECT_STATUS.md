@@ -12,7 +12,7 @@ Provide an IT fault-monitoring console that prioritizes designated uplink failur
 - Local redacted raw and parsed observation storage.
 - Korean fault-monitoring home organized by explicit building, floor, and device scope, with visible switch panels, labeled port states, floor selection, and direct port detail navigation.
 - Configurable local periodic interface collection, stale/failure handling, confirmed incidents, recovery history, and persistent monitoring state.
-- Recent 24-hour port connection markers, a scope-filtered connection list, and persistent per-port connection/disconnection history with clock-adjusted Cisco/Arista logs and explicitly labeled observation intervals; see [fault monitoring](docs/network/FAULT_MONITORING.md#최근-연결-포트와-이력) for evidence and retention limits.
+- Conservative 24-hour unused-port connection markers requiring 10 minutes of prior continuous live inactivity, a scope-filtered connection list, and persistent link history that separates reconnects from qualified connections; see [fault monitoring](docs/network/FAULT_MONITORING.md#최근-연결-포트와-이력) for evidence and retention limits.
 - Device detail contains monitored uplinks, important ports, optional port layout, MAC evidence, and protected port controls. Legacy collection/query APIs and observations remain available.
 - Port status, VLAN, speed/duplex, error-counter, MAC, ARP, and neighbor correlation.
 - Per-interface MAC diagnostics that distinguish learned MACs, no learned entry, down-port state, and missing MAC-table collection evidence.

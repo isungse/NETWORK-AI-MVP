@@ -107,14 +107,16 @@ function elapsed(seconds) {
   return `${Math.floor(seconds / 3600)}시간 전`;
 }
 function connectionEvidence(event) {
+  const unused = event.unused_since
+    ? `미연결 확인 ${time(event.unused_since)}~${time(event.unused_confirmed_at)} · ` : "";
   if (event.source === "observation")
-    return `상태 변화로 발견 · ${time(event.interval_start)} 이후~${time(event.at || event.connected_at)} 사이`;
+    return `${unused}상태 변화로 발견 · ${time(event.interval_start)} 이후~${time(event.at || event.connected_at)} 사이`;
   if (event.source === "device_log_unverified")
     return `장비 로그 · 시계 보정 불가 · 장비 시각 ${time(event.device_at)}`;
   const correction = Math.abs(event.clock_offset_seconds || 0) >= 30
     ? ` · 장비 시각 ${time(event.device_at)} · 시계 차이 약 ${Math.round(Math.abs(event.clock_offset_seconds) / 60)}분 보정`
     : "";
-  return `연결 로그 · 서버 시각 기준(수집 지연 오차 포함)${correction}`;
+  return `${unused}연결 로그 · 서버 시각 기준(수집 지연 오차 포함)${correction}`;
 }
 function markRecentConnection(button, device, port) {
   const connection = FaultPanel.portView(device, port).connection;
@@ -124,7 +126,7 @@ function markRecentConnection(button, device, port) {
   const marker = node("span", `connection-marker${connection.repeated ? "" : " connection-marker-new"}`, label);
   marker.setAttribute("aria-hidden", "true");
   button.append(marker);
-  const description = `최근 24시간 연결 · ${time(connection.connected_at)} · ${elapsed(connection.age_seconds)} · ${connection.connection_count}회 · ${connectionEvidence(connection)}`;
+  const description = `미사용 포트 연결 · ${time(connection.connected_at)} · ${elapsed(connection.age_seconds)} · ${connection.connection_count}회 · ${connectionEvidence(connection)}`;
   button.title += ` · ${description}`;
   button.setAttribute("aria-label", `${button.getAttribute("aria-label")} · ${description}`);
 }
@@ -135,13 +137,13 @@ function renderRecentConnections(data) {
     for (const event of Object.values(d.recent_connections || {})) rows.push({ d, event });
   }
   rows.sort((a, b) => b.event.connected_at.localeCompare(a.event.connected_at));
-  $("#recentConnectionSummary").textContent = `최근 24시간 연결 포트 · ${rows.length}개${floorFilter ? " · 선택한 층" : " · 전체 장비"}`;
+  $("#recentConnectionSummary").textContent = `최근 24시간 미사용 포트 연결 · ${rows.length}개${floorFilter ? " · 선택한 층" : " · 전체 장비"}`;
   const root = $("#recentConnectionList");
   root.replaceChildren();
   if (!rows.length) {
     root.append(node("p", "muted", data.reference_only
       ? "참고 데이터에서는 최근 연결을 표시하지 않습니다."
-      : "확인된 최근 연결 이력이 없습니다. 처음 수집한 연결 상태는 새 연결로 간주하지 않습니다."));
+      : "10분 이상 미연결을 확인한 뒤 연결된 포트가 없습니다. 짧은 끊김·복구와 사전 근거 없는 연결 로그는 NEW로 표시하지 않습니다."));
   } else {
     const wrap = node("div", "table-scroll connection-table-scroll"), table = node("table", "port-table");
     const head = node("tr");
@@ -178,7 +180,9 @@ async function loadConnectionHistory(deviceId, interfaceName, root) {
     root.replaceChildren(node("h4", "", "연결 · 해제 이력"));
     if (result.reference_only) root.append(node("p", "muted", "참고 데이터 · 실시간 이력 확인 불가"));
     for (const event of result.events) {
-      const row = node("p", "connection-history-item", `${time(event.at)} · ${event.state === "up" ? "연결" : "연결 해제"}`);
+      const label = event.state === "up"
+        ? (event.unused_since ? "미사용 포트 연결" : "링크 연결·복구 · 미사용 근거 없음") : "연결 해제";
+      const row = node("p", "connection-history-item", `${time(event.at)} · ${label}`);
       row.append(node("small", "connection-evidence", connectionEvidence(event)));
       root.append(row);
     }
@@ -479,7 +483,7 @@ function renderDashboard(data) {
     node("span", "role-legend", "업링크 · ★ 중요"),
     (() => {
       const legend = node("span", "connection-legend");
-      legend.append(node("span", "connection-marker connection-marker-new", "NEW"), " 청록 테두리 · 최근 24시간 연결");
+      legend.append(node("span", "connection-marker connection-marker-new", "NEW"), " 청록 테두리 · 미사용 포트 연결(24시간)");
       return legend;
     })(),
   );

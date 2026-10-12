@@ -253,6 +253,8 @@ class FaultMonitor:
                                          state.get("checked_at"), at,
                                          not gap and bool(state.get("success")))
                 self.connections.prune(when)
+            elif not success and source == "live" and not self.reference_only:
+                self.connections.break_continuity(device_id)
             state.update(checked_at=at, success=bool(success), reachable=reachable, source=source)
             if success:
                 state["ports"] = ports or []
@@ -308,6 +310,7 @@ class FaultMonitor:
         with self.lock, self.db:
             state = self._state(device_id)
             disabled = state.setdefault("approved_disabled", {})
+            self.db.execute("DELETE FROM port_unused_baselines WHERE device=? AND interface=?", (device_id, interface))
             if desired_state == "shutdown":
                 disabled[interface] = stamp()
                 # Suppression is explicit and separately recorded, never presented as recovery.

@@ -182,6 +182,8 @@ class FaultMonitorTests(unittest.TestCase):
 
     def test_recent_connections_baseline_failures_gaps_and_restart(self):
         self.assertEqual(self.record()["devices"][0]["recent_connections"], {})
+        for _ in range(5):
+            self.record()
         changed = self.record(unused="connected")
         event = changed["devices"][0]["recent_connections"]["Et8"]
         self.assertEqual(event["source"], "observation")
@@ -206,6 +208,23 @@ class FaultMonitorTests(unittest.TestCase):
         probe.assert_not_called()
         self.assertEqual(self.monitor.snapshot(self.at)["metrics"]["last_checked"], before)
         self.assertFalse(self.monitor.connections.log_status("test-switch")["success"])
+
+    def test_unused_baseline_survives_restart_but_failure_and_admin_action_reset_it(self):
+        for _ in range(6):
+            self.record()
+        self.monitor = self.new_monitor()
+        self.assertIn("Et8", self.record(unused="connected")["devices"][0]["recent_connections"])
+        for _ in range(6):
+            self.record()
+        self.record(success=False)
+        self.assertIsNone(self.monitor.db.execute("SELECT since FROM port_unused_baselines WHERE interface='Et8'").fetchone())
+        resumed = self.record(unused="connected")
+        self.assertEqual(resumed["devices"][0]["recent_connections"]["Et8"]["connection_count"], 1)
+        for _ in range(6):
+            self.record()
+        self.monitor.admin_change("test-switch", "Et8", "no shutdown")
+        changed = self.record(unused="connected")
+        self.assertEqual(changed["devices"][0]["recent_connections"]["Et8"]["connection_count"], 1)
 
     def test_poll_collects_connection_logs_after_successful_interface_check(self):
         calls = []
