@@ -180,21 +180,20 @@ class FaultMonitorTests(unittest.TestCase):
         probe.assert_not_called()
         self.assertEqual(self.monitor.db.execute("SELECT COUNT(*) FROM devices").fetchone()[0], 0)
 
-    def test_recent_connections_baseline_failures_gaps_and_restart(self):
-        self.assertEqual(self.record()["devices"][0]["recent_connections"], {})
-        for _ in range(5):
-            self.record()
-        changed = self.record(unused="connected")
-        event = changed["devices"][0]["recent_connections"]["Et8"]
-        self.assertEqual(event["source"], "observation")
-        self.assertEqual(event["connection_count"], 1)
-        self.assertEqual(self.new_monitor().snapshot(self.at)["devices"][0]["recent_connections"]["Et8"]["connection_count"], 1)
+    def test_physical_connection_confirmation_persists_without_inference_from_link_recovery(self):
+        self.record()
+        self.assertEqual(self.record(unused="connected")["devices"][0]["recent_connections"], {})
+        event = self.monitor.connections.history("test-switch", "Et8")[0]
+        with self.monitor.lock, self.monitor.db:
+            self.monitor.connections.confirm_physical("test-switch", "Et8", event["id"], confirmed=True, now=self.at)
+        self.monitor._persist()
+        self.assertTrue(self.new_monitor().snapshot(self.at)["devices"][0]["recent_connections"]["Et8"]["physical_confirmed"])
         self.record(success=False, reachable=False)
         self.record(unused="notconnect")
-        self.assertEqual(len(self.monitor.connections.history("test-switch", "Et8")), 1)
-        self.at += timedelta(seconds=601)
         self.record(unused="connected")
-        self.assertEqual(len(self.monitor.connections.history("test-switch", "Et8")), 1)
+        self.assertEqual(self.monitor.snapshot(self.at)["devices"][0]["recent_connections"]["Et8"]["connection_count"], 1)
+        self.at += timedelta(hours=24)
+        self.assertEqual(self.monitor.snapshot(self.at)["devices"][0]["recent_connections"], {})
 
     def test_log_only_collection_cannot_refresh_health(self):
         self.record()
@@ -209,22 +208,11 @@ class FaultMonitorTests(unittest.TestCase):
         self.assertEqual(self.monitor.snapshot(self.at)["metrics"]["last_checked"], before)
         self.assertFalse(self.monitor.connections.log_status("test-switch")["success"])
 
-    def test_unused_baseline_survives_restart_but_failure_and_admin_action_reset_it(self):
-        for _ in range(6):
-            self.record()
-        self.monitor = self.new_monitor()
-        self.assertIn("Et8", self.record(unused="connected")["devices"][0]["recent_connections"])
-        for _ in range(6):
-            self.record()
-        self.record(success=False)
-        self.assertIsNone(self.monitor.db.execute("SELECT since FROM port_unused_baselines WHERE interface='Et8'").fetchone())
-        resumed = self.record(unused="connected")
-        self.assertEqual(resumed["devices"][0]["recent_connections"]["Et8"]["connection_count"], 1)
+    def test_unused_duration_and_admin_action_never_confirm_physical_insertion(self):
         for _ in range(6):
             self.record()
         self.monitor.admin_change("test-switch", "Et8", "no shutdown")
-        changed = self.record(unused="connected")
-        self.assertEqual(changed["devices"][0]["recent_connections"]["Et8"]["connection_count"], 1)
+        self.assertEqual(self.record(unused="connected")["devices"][0]["recent_connections"], {})
 
     def test_poll_collects_connection_logs_after_successful_interface_check(self):
         calls = []

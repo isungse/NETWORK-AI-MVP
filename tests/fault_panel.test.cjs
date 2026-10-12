@@ -100,6 +100,7 @@ console.log("Fault panel state, scope, and layout checks passed");
 
 const recentDevice = { ...device, recent_connections: { Et1: {
   connected_at: "2026-10-12T00:00:00Z", repeated: false, connection_count: 1,
+  physical_confirmed: true,
 } } };
 for (const [status, expected] of [["connected", "connected"], ["notconnect", "idle"], ["errdisabled", "error"]]) {
   const view = panel.portView(recentDevice, { interface: "Ethernet1", status });
@@ -109,6 +110,7 @@ for (const [status, expected] of [["connected", "connected"], ["notconnect", "id
 assert.equal(panel.portView(recentDevice, { interface: "Et1", status: "connected", speed: "a-10M" }).state, "slow");
 assert.equal(panel.portView({ ...recentDevice, port_data_current: false }, port).state, "unknown");
 assert.equal(panel.portView(device, port).connection, null);
+assert.equal(panel.portView({ ...recentDevice, recent_connections: { Et1: { physical_confirmed: false } } }, port).connection, null);
 console.log("Recent connection markers preserve current state and speed semantics");
 
 for (const speed of ["10", "a-10", "10M", "a-10M", "10Mbps"]) {

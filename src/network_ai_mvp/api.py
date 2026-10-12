@@ -197,6 +197,23 @@ def create_app(
     @app.get("/events/monitoring", include_in_schema=False)
     def monitoring_events(): return StreamingResponse(monitoring_hub.event_stream(), media_type="text/event-stream")
 
+    @app.post("/fault-monitor/physical-connections")
+    def confirm_physical_connection(body: dict):
+        if fault_monitor.reference_only:
+            raise HTTPException(status_code=403, detail="참고 데이터에서는 물리 연결을 확인할 수 없습니다.")
+        device_id, interface = body.get("device_id"), body.get("interface")
+        if not isinstance(device_id, str) or not isinstance(interface, str):
+            raise HTTPException(status_code=422, detail="장비와 포트를 지정하세요.")
+        inventory_device(device_id)
+        try:
+            fault_monitor.confirm_physical_connection(device_id, interface, body.get("event_id"),
+                confirmed=body.get("confirmed"), note=body.get("note", ""))
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"success": True, "physical_confirmed": body["confirmed"]}
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {

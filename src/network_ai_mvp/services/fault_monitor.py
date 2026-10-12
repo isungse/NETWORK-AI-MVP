@@ -253,8 +253,6 @@ class FaultMonitor:
                                          state.get("checked_at"), at,
                                          not gap and bool(state.get("success")))
                 self.connections.prune(when)
-            elif not success and source == "live" and not self.reference_only:
-                self.connections.break_continuity(device_id)
             state.update(checked_at=at, success=bool(success), reachable=reachable, source=source)
             if success:
                 state["ports"] = ports or []
@@ -310,7 +308,6 @@ class FaultMonitor:
         with self.lock, self.db:
             state = self._state(device_id)
             disabled = state.setdefault("approved_disabled", {})
-            self.db.execute("DELETE FROM port_unused_baselines WHERE device=? AND interface=?", (device_id, interface))
             if desired_state == "shutdown":
                 disabled[interface] = stamp()
                 # Suppression is explicit and separately recorded, never presented as recovery.
@@ -319,6 +316,13 @@ class FaultMonitor:
                 disabled.pop(interface, None)
             state.get("metrics", {}).pop(f"important:{interface}", None)
             self._save(device_id, state)
+        self._persist()
+
+    def confirm_physical_connection(self, device_id, interface, event_id, *, confirmed, note=""):
+        if self.reference_only:
+            raise ValueError("참고 데이터에서는 물리 연결을 확인할 수 없습니다.")
+        with self.lock, self.db:
+            self.connections.confirm_physical(device_id, interface, event_id, confirmed=confirmed, note=note)
         self._persist()
 
     def snapshot(self, now=None):

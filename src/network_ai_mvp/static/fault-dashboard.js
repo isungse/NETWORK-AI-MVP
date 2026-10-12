@@ -107,26 +107,24 @@ function elapsed(seconds) {
   return `${Math.floor(seconds / 3600)}시간 전`;
 }
 function connectionEvidence(event) {
-  const unused = event.unused_since
-    ? `미연결 확인 ${time(event.unused_since)}~${time(event.unused_confirmed_at)} · ` : "";
+  const physical = event.physical_confirmed ? "물리 연결 확인 · " : "";
   if (event.source === "observation")
-    return `${unused}상태 변화로 발견 · ${time(event.interval_start)} 이후~${time(event.at || event.connected_at)} 사이`;
+    return `${physical}상태 변화로 발견 · ${time(event.interval_start)} 이후~${time(event.at || event.connected_at)} 사이`;
   if (event.source === "device_log_unverified")
     return `장비 로그 · 시계 보정 불가 · 장비 시각 ${time(event.device_at)}`;
   const correction = Math.abs(event.clock_offset_seconds || 0) >= 30
     ? ` · 장비 시각 ${time(event.device_at)} · 시계 차이 약 ${Math.round(Math.abs(event.clock_offset_seconds) / 60)}분 보정`
     : "";
-  return `${unused}연결 로그 · 서버 시각 기준(수집 지연 오차 포함)${correction}`;
+  return `${physical}연결 로그 · 서버 시각 기준(수집 지연 오차 포함)${correction}`;
 }
 function markRecentConnection(button, device, port) {
   const connection = FaultPanel.portView(device, port).connection;
   if (!connection) return;
   button.classList.add("recent-connection");
-  const label = connection.repeated ? "반복" : "NEW";
-  const marker = node("span", `connection-marker${connection.repeated ? "" : " connection-marker-new"}`, label);
+  const marker = node("span", "connection-marker connection-marker-new", "NEW");
   marker.setAttribute("aria-hidden", "true");
   button.append(marker);
-  const description = `미사용 포트 연결 · ${time(connection.connected_at)} · ${elapsed(connection.age_seconds)} · ${connection.connection_count}회 · ${connectionEvidence(connection)}`;
+  const description = `물리 연결 확인 · ${time(connection.connected_at)} · ${elapsed(connection.age_seconds)} · ${connection.connection_count}회 · ${connectionEvidence(connection)}`;
   button.title += ` · ${description}`;
   button.setAttribute("aria-label", `${button.getAttribute("aria-label")} · ${description}`);
 }
@@ -134,16 +132,17 @@ function renderRecentConnections(data) {
   const rows = [];
   for (const d of data.devices) {
     if (floorFilter && JSON.stringify([d.building || "건물 미설정", d.floor || "층 미설정"]) !== floorFilter) continue;
-    for (const event of Object.values(d.recent_connections || {})) rows.push({ d, event });
+    for (const event of Object.values(d.recent_connections || {}))
+      if (event.physical_confirmed === true) rows.push({ d, event });
   }
   rows.sort((a, b) => b.event.connected_at.localeCompare(a.event.connected_at));
-  $("#recentConnectionSummary").textContent = `최근 24시간 미사용 포트 연결 · ${rows.length}개${floorFilter ? " · 선택한 층" : " · 전체 장비"}`;
+  $("#recentConnectionSummary").textContent = `최근 24시간 물리 연결 · ${rows.length}개${floorFilter ? " · 선택한 층" : " · 전체 장비"}`;
   const root = $("#recentConnectionList");
   root.replaceChildren();
   if (!rows.length) {
     root.append(node("p", "muted", data.reference_only
       ? "참고 데이터에서는 최근 연결을 표시하지 않습니다."
-      : "10분 이상 미연결을 확인한 뒤 연결된 포트가 없습니다. 짧은 끊김·복구와 사전 근거 없는 연결 로그는 NEW로 표시하지 않습니다."));
+      : "최근 24시간 내 물리 연결이 확인된 포트가 없습니다. 케이블 연결을 확인한 기록에만 NEW를 표시합니다."));
   } else {
     const wrap = node("div", "table-scroll connection-table-scroll"), table = node("table", "port-table");
     const head = node("tr");
@@ -181,9 +180,28 @@ async function loadConnectionHistory(deviceId, interfaceName, root) {
     if (result.reference_only) root.append(node("p", "muted", "참고 데이터 · 실시간 이력 확인 불가"));
     for (const event of result.events) {
       const label = event.state === "up"
-        ? (event.unused_since ? "미사용 포트 연결" : "링크 연결·복구 · 미사용 근거 없음") : "연결 해제";
+        ? (event.physical_confirmed ? "물리 연결 확인" : "링크 연결·복구 · 물리 연결 미확인") : "연결 해제";
       const row = node("p", "connection-history-item", `${time(event.at)} · ${label}`);
       row.append(node("small", "connection-evidence", connectionEvidence(event)));
+      if (event.physical_confirmation_note && event.physical_confirmed)
+        row.append(node("small", "connection-evidence", event.physical_confirmation_note));
+      if (!result.reference_only && event.state === "up" && event.source !== "device_log_unverified") {
+        const confirm = node("button", "target-chip", event.physical_confirmed ? "물리 연결 확인 취소" : "실제 케이블 연결 확인");
+        confirm.type = "button";
+        confirm.title = "이 연결 시각에 실제로 케이블을 새로 연결했을 때만 확인하세요. NEW는 확인 버튼을 누른 시각이 아닌 연결 시각부터 24시간 표시됩니다.";
+        confirm.onclick = async () => {
+          confirm.disabled = true;
+          try {
+            await post("/fault-monitor/physical-connections", {device_id: deviceId, interface: interfaceName,
+              event_id: event.id, confirmed: !event.physical_confirmed, note: "운영 화면에서 실제 케이블 연결 여부 확인"});
+            await refresh();
+          } catch (error) {
+            row.append(node("small", "notice error", error.message));
+            confirm.disabled = false;
+          }
+        };
+        row.append(confirm);
+      }
       root.append(row);
     }
     if (!result.events.length) root.append(node("p", "muted", "기록된 연결·해제 이력이 없습니다. 최초 연결 상태만으로 연결 시각을 추정하지 않습니다."));
@@ -483,7 +501,7 @@ function renderDashboard(data) {
     node("span", "role-legend", "업링크 · ★ 중요"),
     (() => {
       const legend = node("span", "connection-legend");
-      legend.append(node("span", "connection-marker connection-marker-new", "NEW"), " 청록 테두리 · 미사용 포트 연결(24시간)");
+      legend.append(node("span", "connection-marker connection-marker-new", "NEW"), " 청록 테두리 · 물리 연결 확인(24시간)");
       return legend;
     })(),
   );
