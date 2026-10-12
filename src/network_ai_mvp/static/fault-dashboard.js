@@ -110,12 +110,12 @@ function slotHeading(device, slot, base, tag = "div") {
   title.dataset.deviceId = device.device_id;
   title.dataset.baseTitle = base;
   header.append(title);
-  if (device.slot_alias_editable && ["1", "2", "3"].includes(slot)) {
+  if (device.slot_alias_editable && device.slot_alias_slots?.includes(slot)) {
     const edit = node("button", "module-edit", "✎ 편집");
     edit.type = "button";
     edit.dataset.slot = slot;
     edit.dataset.deviceId = device.device_id;
-    edit.setAttribute("aria-label", `${device.hostname} · 슬롯 ${slot} 별칭 편집`);
+    edit.setAttribute("aria-label", `${device.hostname} · ${base} 별칭 편집`);
     edit.onclick = () => {
       slotEditor = { deviceId: device.device_id, slot, base,
         expectedAlias: device.slot_aliases?.[slot] || "",
@@ -346,9 +346,7 @@ function renderSwitchPanel(d) {
     );
   for (const group of layout.groups) {
     const module = node("section", "rack-module");
-    module.append(group.key.startsWith("slot:")
-      ? slotHeading(d, group.key.slice(5), group.label)
-      : node("div", "module-label", group.label));
+    module.append(slotHeading(d, group.slot, group.label));
     const banks = node("div", "rack-banks");
     for (const bank of group.banks) {
       const bankNode = node("div", "rack-bank"),
@@ -849,25 +847,18 @@ function renderDetail(d) {
         : "논리 포트 번호 기준 · 실제 전면 배치는 확인되지 않았습니다.",
     ),
   );
-  const ports = [...d.ports].sort((a, b) =>
-    a.interface.localeCompare(b.interface, "en", { numeric: true }),
-  );
-  const groups = new Map();
-  for (const p of ports) {
-    const slot =
-      d.device_id === "cisco-backbone"
-        ? p.interface.match(/^[A-Za-z]+(\d+)\//)?.[1] || "기타"
-        : "포트";
-    if (!groups.has(slot)) groups.set(slot, []);
-    groups.get(slot).push(p);
-  }
-  for (const [slot, members] of groups) {
-    if (d.device_id === "cisco-backbone")
-      layout.append(
-        slotHeading(d, slot, `슬롯 ${slot} · ${{ 1: "WS-X45-SUP7-E", 2: "WS-X4724-SFP-E", 3: "WS-X4748-RJ45-E" }[slot] || "논리 인터페이스"}`, "h3"),
-      );
+  const physicalGroups = FaultPanel.groups(d).groups;
+  const auxiliary = d.ports.filter((p) => !FaultPanel.physical(p.interface, d));
+  const groups = physicalGroups.map((group) => ({
+    ...group, members: group.ports.map((item) => item.port),
+  }));
+  if (auxiliary.length) groups.push({ label: "기타 인터페이스", members: auxiliary });
+  for (const group of groups) {
+    layout.append(group.slot
+      ? slotHeading(d, group.slot, group.label, "h3")
+      : node("h3", "module-label", group.label));
     const grid = node("div", "port-grid");
-    for (const p of members) {
+    for (const p of group.members) {
       const m = d.port_states.find((s) => s.interface === p.interface);
       const status = !d.port_data_current
         ? "unknown"

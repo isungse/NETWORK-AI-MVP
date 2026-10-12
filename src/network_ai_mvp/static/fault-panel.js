@@ -112,6 +112,7 @@ const FaultPanel = (() => {
       if (!groups.has(key))
         groups.set(key, {
           key,
+          slot: info.slot ? info.slot.replaceAll("/", "-") : "fixed",
           label: confirmedModule
             ? `슬롯 ${info.slot} · ${confirmedModule}`
             : `${info.prefix}${info.slot ? info.slot + "/" : ""} 포트`,

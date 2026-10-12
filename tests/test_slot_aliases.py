@@ -63,9 +63,43 @@ class SlotAliasTests(unittest.TestCase):
                 self.assertEqual(self.save(alias).status_code, 422)
         self.assertEqual(self.client.post(self.url, json={"alias": "누락"}).status_code, 422)
         self.assertEqual(self.save("별칭", url=self.url.replace("slots/1", "slots/4")).status_code, 422)
-        self.assertEqual(self.save("별칭", url=self.url.replace("cisco-backbone", "arista-10g-core")).status_code, 422)
+        self.assertEqual(self.save("별칭", url=self.url.replace("cisco-backbone/slots/1", "arista-10g-core/slots/999")).status_code, 422)
         self.assertEqual(self.save("별칭", url=self.url.replace("cisco-backbone", "missing-device")).status_code, 404)
         self.assertEqual(self.app.state.fault_monitor.db.execute("SELECT count(*) FROM slot_alias_audit").fetchone()[0], 0)
+
+    def test_every_inventory_device_can_edit_its_display_slots(self):
+        monitor = self.app.state.fault_monitor
+        for device in monitor.inventory.list_devices():
+            with self.subTest(device=device.device_id):
+                interface = "Et1" if device.vendor == "arista" else "Gi1/1" if device.device_id == "cisco-backbone" else "Gi1/0/1"
+                slot = "fixed" if device.vendor == "arista" else "1" if device.device_id == "cisco-backbone" else "1-0"
+                monitor.record(device.device_id, success=True, ports=[{"interface": interface, "status": "connected"}])
+                url = f"/fault-monitor/devices/{device.device_id}/slots/{slot}/alias"
+                self.assertEqual(self.save("직원 지정 이름", url=url).status_code, 200)
+                detail = self.client.get(f"/fault-monitor/devices/{device.device_id}").json()
+                self.assertTrue(detail["slot_alias_editable"])
+                self.assertIn(slot, detail["slot_alias_slots"])
+                self.assertEqual(detail["slot_aliases"][slot], "직원 지정 이름")
+
+    def test_stack_slots_are_independent_and_not_limited_to_one_through_three(self):
+        monitor = self.app.state.fault_monitor
+        monitor.record("arista-10g-core", success=True, ports=[
+            {"interface": "Gi4/0/1"}, {"interface": "Te4/0/2"}, {"interface": "Gi5/0/1"}])
+        for slot in ("4-0", "5-0"):
+            url = f"/fault-monitor/devices/arista-10g-core/slots/{slot}/alias"
+            self.assertEqual(self.save(f"슬롯 {slot}", url=url).status_code, 200)
+        restarted = TestClient(self.new_app()).get("/fault-monitor/devices/arista-10g-core").json()
+        self.assertEqual(restarted["slot_aliases"], {"4-0": "슬롯 4-0", "5-0": "슬롯 5-0"})
+
+    def test_fixed_switch_lanes_share_one_alias_and_logical_ports_are_excluded(self):
+        monitor = self.app.state.fault_monitor
+        monitor.record("arista-10g-core", success=True, ports=[
+            {"interface": "Et1"}, {"interface": "Et49/1"}, {"interface": "Et56/1"},
+            {"interface": "Vl102"}, {"interface": "Po10"}, {"interface": "Fa0"}])
+        detail = self.client.get("/fault-monitor/devices/arista-10g-core").json()
+        self.assertEqual(detail["slot_alias_slots"], ["fixed"])
+        self.assertEqual(self.save("10G 코어", url="/fault-monitor/devices/arista-10g-core/slots/fixed/alias").status_code, 200)
+        self.assertEqual(self.save("분기 아님", url="/fault-monitor/devices/arista-10g-core/slots/49/alias").status_code, 422)
 
     def test_reference_runtime_rejects_edits_even_with_direct_post(self):
         with patch("network_ai_mvp.api.IS_VERCEL", True):

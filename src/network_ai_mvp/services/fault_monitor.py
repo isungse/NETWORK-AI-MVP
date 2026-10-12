@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import socket
 import sqlite3
 import unicodedata
@@ -22,7 +23,21 @@ LOG = logging.getLogger(__name__)
 UP = {"connected", "up"}
 ADMIN_DOWN = {"disabled", "administratively down", "admin-down", "admin down"}
 DOWN = {"notconnect", "down", "errdisabled", "err-disabled", *ADMIN_DOWN}
-BACKBONE_SLOTS = {"1", "2", "3"}
+
+
+def physical_slot_id(interface, device):
+    """Stable display-slot IDs; fixed-switch breakout lanes are not chassis slots."""
+    name = short_interface_name(interface)
+    if name == "Fa0" or (device.device_id == "cisco-backbone" and name == "Fa1"):
+        return None
+    match = re.fullmatch(r"(Et|Gi|Te|Fa)(\d+(?:/\d+)*)", name, re.IGNORECASE)
+    if not match:
+        return None
+    path = match[2].split("/")
+    fixed_lane = (device.platform in {"DCS-7050TX3", "DCS-7050SX3-48YC8-F"}
+                  and match[1].lower() == "et" and len(path) == 2 and path[1] == "1"
+                  and 49 <= int(path[0]) <= 56)
+    return "fixed" if fixed_lane or len(path) == 1 else "-".join(path[:-1])
 
 
 class SlotAliasConflict(ValueError):
@@ -336,14 +351,24 @@ class FaultMonitor:
         self._persist()
 
     def slot_alias_editable(self, device):
-        return (not self.reference_only and device.device_id == "cisco-backbone"
-                and device.platform == "WS-C4503-E")
+        return not self.reference_only
+
+    def slot_alias_slots(self, device):
+        with self.lock:
+            state = self._state(device.device_id)
+            cfg = self.config["devices"].get(device.device_id, {})
+            ports = [*state.get("ports", []), *(cfg.get("uplinks") or []), *(cfg.get("important_ports") or [])]
+            slots = {physical_slot_id(port.get("interface"), device) for port in ports}
+            slots.discard(None)
+            if device.device_id == "cisco-backbone" and device.platform == "WS-C4503-E":
+                slots.update({"1", "2", "3"})
+            return sorted(slots)
 
     def set_slot_alias(self, device_id, slot, alias, expected_alias):
         if self.reference_only:
             raise PermissionError("참고 화면에서는 슬롯 별칭을 편집할 수 없습니다.")
         device = self.inventory.get_device(device_id)
-        if not self.slot_alias_editable(device) or slot not in BACKBONE_SLOTS:
+        if slot not in self.slot_alias_slots(device):
             raise ValueError("편집 가능한 장비와 슬롯을 지정하세요.")
         if not isinstance(alias, str) or not isinstance(expected_alias, str):
             raise ValueError("별칭과 기존 별칭은 문자열이어야 합니다.")
@@ -421,6 +446,7 @@ class FaultMonitor:
                                 "recent_connections": recent_connections.get(device.device_id, {}),
                                 "connection_log_status": self.connections.log_status(device.device_id),
                                 "slot_alias_editable": self.slot_alias_editable(device),
+                                "slot_alias_slots": self.slot_alias_slots(device),
                                 "slot_aliases": dict(self.db.execute("SELECT slot,alias FROM slot_aliases WHERE device=?", (device.device_id,)).fetchall()),
                                 "ports": state.get("ports", []), "config": cfg})
             rows = self.db.execute("SELECT device,kind,interface,first_seen,confirmed_at,last_checked,recovered_at,ended_reason FROM incidents ORDER BY id DESC LIMIT 300").fetchall()

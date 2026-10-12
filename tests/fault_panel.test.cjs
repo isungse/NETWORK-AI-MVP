@@ -94,6 +94,8 @@ const chassis = panel.groups({
 });
 assert.equal(chassis.groups.length, 2);
 assert.equal(chassis.groups[0].ports.length, 2);
+assert.equal(chassis.groups[0].slot, "1");
+assert.equal(chassis.groups[1].slot, "3");
 assert.equal(chassis.auxiliary, 1);
 assert.ok(panel.floorOrder("B1F") < panel.floorOrder("1F"));
 console.log("Fault panel state, scope, and layout checks passed");
@@ -151,7 +153,15 @@ const core = panel.groups({
   ],
 });
 assert.equal(core.groups.length, 1);
+assert.equal(core.groups[0].slot, "fixed");
 assert.equal(core.groups[0].ports.length, 56);
 assert.equal(core.auxiliary, 3);
 assert.equal(core.groups[0].banks.at(-1).ports.at(-1).view.name, "Et56/1");
 assert.equal(core.groups[0].ports.filter(p => p.view.roles.includes("업링크")).length, 2);
+
+const stack = panel.groups({ ...device, panel_ports: [
+  {interface: "Gi4/0/1"}, {interface: "Te4/0/2"}, {interface: "Gi5/0/1"},
+] });
+assert.equal(stack.groups.length, 3);
+assert.equal(stack.groups.filter(g => g.slot === "4-0").length, 2);
+assert.equal(stack.groups.filter(g => g.slot === "5-0").length, 1);
