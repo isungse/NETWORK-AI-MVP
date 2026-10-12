@@ -17,6 +17,7 @@ Provide an IT fault-monitoring console that prioritizes designated uplink failur
 - Port status, VLAN, speed/duplex, error-counter, MAC, ARP, and neighbor correlation.
 - Per-interface MAC diagnostics that distinguish learned MACs, no learned entry, down-port state, and missing MAC-table collection evidence.
 - Chassis-aware backbone faceplate rendering with confirmed slot, module type, model, port count, and serial reference metadata.
+- Shared, persistent backbone slot display aliases with adjacent edit buttons, preview, reset, conflict detection, and change audit; see [slot aliases](docs/network/FAULT_MONITORING.md#슬롯-제목-별칭).
 - `link-diagnostics` analysis over the latest 10-minute observation window.
 - Physical LINK Up to Line Protocol Up sequence detection.
 - Current-port and other-port LINK/LINEPROTO event summaries.

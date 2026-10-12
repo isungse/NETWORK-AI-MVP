@@ -21,6 +21,8 @@ let dashboard,
   detailGeneration = 0;
 let fetchInFlight = false;
 let floorFilter = "";
+let slotEditor = null;
+let slotAliasSaving = false;
 const time = (value) =>
   value
     ? new Intl.DateTimeFormat("ko-KR", {
@@ -100,6 +102,68 @@ function post(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+function slotHeading(device, slot, base, tag = "div") {
+  const header = node("div", "module-heading");
+  const title = node(tag, "module-label", FaultPanel.slotTitle(base, device.slot_aliases?.[slot]));
+  title.dataset.slotTitle = slot;
+  title.dataset.deviceId = device.device_id;
+  title.dataset.baseTitle = base;
+  header.append(title);
+  if (device.slot_alias_editable && ["1", "2", "3"].includes(slot)) {
+    const edit = node("button", "module-edit", "✎ 편집");
+    edit.type = "button";
+    edit.dataset.slot = slot;
+    edit.dataset.deviceId = device.device_id;
+    edit.setAttribute("aria-label", `${device.hostname} · 슬롯 ${slot} 별칭 편집`);
+    edit.onclick = () => {
+      slotEditor = { deviceId: device.device_id, slot, base,
+        expectedAlias: device.slot_aliases?.[slot] || "",
+        inDetail: Boolean(edit.closest("#deviceDialog")) };
+      $("#slotAliasTarget").textContent = `${device.hostname} · ${base}`;
+      $("#slotAliasInput").value = slotEditor.expectedAlias;
+      $("#slotAliasResult").textContent = "";
+      updateSlotAliasPreview();
+      $("#slotAliasDialog").showModal();
+      $("#slotAliasInput").focus();
+    };
+    header.append(edit);
+  }
+  return header;
+}
+function updateSlotAliasPreview() {
+  if (slotEditor)
+    $("#slotAliasPreview").textContent = FaultPanel.slotTitle(slotEditor.base, $("#slotAliasInput").value.trim());
+}
+async function saveSlotAlias(event) {
+  event.preventDefault();
+  if (!slotEditor || slotAliasSaving) return;
+  slotAliasSaving = true;
+  const controls = [...$("#slotAliasDialog").querySelectorAll("button, input")];
+  controls.forEach((control) => { control.disabled = true; });
+  $("#slotAliasResult").textContent = "저장 중…";
+  const editor = slotEditor;
+  try {
+    const result = await post(`/fault-monitor/devices/${encodeURIComponent(editor.deviceId)}/slots/${editor.slot}/alias`, {
+      alias: $("#slotAliasInput").value, expected_alias: editor.expectedAlias,
+    });
+    for (const device of [...(dashboard?.devices || []), selectedDevice].filter(Boolean)) {
+      if (device.device_id === editor.deviceId) {
+        device.slot_aliases ||= {};
+        device.slot_aliases[editor.slot] = result.alias;
+      }
+    }
+    for (const title of document.querySelectorAll("[data-slot-title]")) {
+      if (title.dataset.deviceId === editor.deviceId && title.dataset.slotTitle === editor.slot)
+        title.textContent = FaultPanel.slotTitle(title.dataset.baseTitle, result.alias);
+    }
+    $("#slotAliasDialog").close();
+  } catch (error) {
+    $("#slotAliasResult").textContent = `저장하지 못했습니다: ${error.message}`;
+  } finally {
+    slotAliasSaving = false;
+    controls.forEach((control) => { control.disabled = false; });
+  }
 }
 function elapsed(seconds) {
   if (seconds < 60) return "방금";
@@ -282,7 +346,9 @@ function renderSwitchPanel(d) {
     );
   for (const group of layout.groups) {
     const module = node("section", "rack-module");
-    module.append(node("div", "module-label", group.label));
+    module.append(group.key.startsWith("slot:")
+      ? slotHeading(d, group.key.slice(5), group.label)
+      : node("div", "module-label", group.label));
     const banks = node("div", "rack-banks");
     for (const bank of group.banks) {
       const bankNode = node("div", "rack-bank"),
@@ -421,6 +487,7 @@ function renderDashboard(data) {
   const focusDevice =
     document.activeElement?.closest(".switch-card")?.dataset.deviceId;
   const focusPort = document.activeElement?.dataset.interface;
+  const focusSlot = document.activeElement?.dataset.slot;
   dashboard = data;
   $("#metrics").replaceChildren(
     ...[
@@ -550,7 +617,11 @@ function renderDashboard(data) {
       ? [...(card?.querySelectorAll(".socket") || [])].find(
           (e) => e.dataset.interface === focusPort,
         )
-      : card?.querySelector(".device-link");
+      : focusSlot
+        ? [...(card?.querySelectorAll(".module-edit") || [])].find(
+            (e) => e.dataset.slot === focusSlot,
+          )
+        : card?.querySelector(".device-link");
     target?.focus({ preventScroll: true });
   }
   $("#collectionStatus").textContent =
@@ -593,13 +664,13 @@ async function refresh() {
   }
 }
 async function refreshDetail() {
-  if (!selectedDevice || !$("#deviceDialog").open || $("#changeDialog").open)
+  if (!selectedDevice || !$("#deviceDialog").open || $("#changeDialog").open || $("#slotAliasDialog").open)
     return;
   const id = selectedDevice.device_id,
     generation = detailGeneration;
   try {
     const d = await api(`/fault-monitor/devices/${encodeURIComponent(id)}`);
-    if (generation !== detailGeneration || !$("#deviceDialog").open) return;
+    if (generation !== detailGeneration || !$("#deviceDialog").open || $("#slotAliasDialog").open) return;
     const open = [...document.querySelectorAll("#detailBody details")].map(
         (e) => e.open,
       ),
@@ -793,11 +864,7 @@ function renderDetail(d) {
   for (const [slot, members] of groups) {
     if (d.device_id === "cisco-backbone")
       layout.append(
-        node(
-          "h3",
-          "",
-          `슬롯 ${slot} · ${{ 1: "WS-X45-SUP7-E", 2: "WS-X4724-SFP-E", 3: "WS-X4748-RJ45-E" }[slot] || "논리 인터페이스"}`,
-        ),
+        slotHeading(d, slot, `슬롯 ${slot} · ${{ 1: "WS-X45-SUP7-E", 2: "WS-X4724-SFP-E", 3: "WS-X4748-RJ45-E" }[slot] || "논리 인터페이스"}`, "h3"),
       );
     const grid = node("div", "port-grid");
     for (const p of members) {
@@ -988,6 +1055,26 @@ $("#changeForm").addEventListener("submit", async (event) => {
   } finally {
     $("#closeChange").disabled = false;
   }
+});
+$("#slotAliasForm").addEventListener("submit", saveSlotAlias);
+$("#slotAliasInput").oninput = updateSlotAliasPreview;
+$("#clearSlotAlias").onclick = () => {
+  $("#slotAliasInput").value = "";
+  updateSlotAliasPreview();
+  $("#slotAliasInput").focus();
+};
+for (const id of ["closeSlotAlias", "cancelSlotAlias"])
+  $("#" + id).onclick = () => $("#slotAliasDialog").close();
+$("#slotAliasDialog").addEventListener("cancel", (event) => {
+  if (slotAliasSaving) event.preventDefault();
+});
+$("#slotAliasDialog").addEventListener("close", () => {
+  if (!slotEditor) return;
+  const root = $(slotEditor.inDetail ? "#detailBody" : "#buildings");
+  [...root.querySelectorAll(".module-edit")].find((button) =>
+    button.dataset.deviceId === slotEditor.deviceId && button.dataset.slot === slotEditor.slot
+  )?.focus({ preventScroll: true });
+  slotEditor = null;
 });
 $("#closeDetail").onclick = () => {
   ++detailGeneration;

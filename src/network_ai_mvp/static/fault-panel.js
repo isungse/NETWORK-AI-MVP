@@ -144,5 +144,8 @@ const FaultPanel = (() => {
     if (/^\d+F$/i.test(value)) return Number(value.slice(0, -1));
     return 999;
   }
-  return { states, shortName, physical, portView, groups, floorOrder };
+  function slotTitle(base, alias) {
+    return alias ? `${base} (${alias})` : base;
+  }
+  return { states, shortName, physical, portView, groups, floorOrder, slotTitle };
 })();

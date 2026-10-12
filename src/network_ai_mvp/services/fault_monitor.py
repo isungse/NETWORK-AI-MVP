@@ -5,6 +5,7 @@ import json
 import logging
 import socket
 import sqlite3
+import unicodedata
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,13 @@ LOG = logging.getLogger(__name__)
 UP = {"connected", "up"}
 ADMIN_DOWN = {"disabled", "administratively down", "admin-down", "admin down"}
 DOWN = {"notconnect", "down", "errdisabled", "err-disabled", *ADMIN_DOWN}
+BACKBONE_SLOTS = {"1", "2", "3"}
+
+
+class SlotAliasConflict(ValueError):
+    """Another operator has changed the alias since the editor was opened."""
+
+
 DEFAULT_SETTINGS = {
     "interval_seconds": 120, "stale_after_seconds": 600,
     "failure_threshold": 3, "recovery_threshold": 2,
@@ -122,6 +130,8 @@ class FaultMonitor:
             with closing(sqlite3.connect(str(self.db_path))) as saved:
                 saved.backup(self.db)
         self.db.execute("CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+        self.db.execute("CREATE TABLE IF NOT EXISTS slot_aliases (device TEXT, slot TEXT, alias TEXT NOT NULL, PRIMARY KEY (device, slot))")
+        self.db.execute("CREATE TABLE IF NOT EXISTS slot_alias_audit (id INTEGER PRIMARY KEY, device TEXT, slot TEXT, previous_alias TEXT, alias TEXT, changed_at TEXT)")
         self.db.execute("CREATE TABLE IF NOT EXISTS incidents (id INTEGER PRIMARY KEY, device TEXT, metric TEXT, kind TEXT, interface TEXT, first_seen TEXT, confirmed_at TEXT, last_checked TEXT, recovered_at TEXT, ended_reason TEXT)")
         self.connections = PortConnections(self.db)
         self.db.commit()
@@ -325,6 +335,34 @@ class FaultMonitor:
             self.connections.confirm_physical(device_id, interface, event_id, confirmed=confirmed, note=note)
         self._persist()
 
+    def slot_alias_editable(self, device):
+        return (not self.reference_only and device.device_id == "cisco-backbone"
+                and device.platform == "WS-C4503-E")
+
+    def set_slot_alias(self, device_id, slot, alias, expected_alias):
+        if self.reference_only:
+            raise PermissionError("참고 화면에서는 슬롯 별칭을 편집할 수 없습니다.")
+        device = self.inventory.get_device(device_id)
+        if not self.slot_alias_editable(device) or slot not in BACKBONE_SLOTS:
+            raise ValueError("편집 가능한 장비와 슬롯을 지정하세요.")
+        if not isinstance(alias, str) or not isinstance(expected_alias, str):
+            raise ValueError("별칭과 기존 별칭은 문자열이어야 합니다.")
+        if len(alias) > 80 or any(unicodedata.category(c).startswith("C") for c in alias):
+            raise ValueError("별칭은 제어 문자 없이 80자 이내로 입력하세요.")
+        alias = alias.strip()
+        with self.lock:
+            with self.db:
+                row = self.db.execute("SELECT alias FROM slot_aliases WHERE device=? AND slot=?", (device_id, slot)).fetchone()
+                previous = row[0] if row else ""
+                if previous != expected_alias:
+                    raise SlotAliasConflict("다른 직원이 별칭을 수정했습니다. 편집 창을 닫고 최신 제목에서 다시 편집하세요.")
+                if alias != previous:
+                    self.db.execute("INSERT OR REPLACE INTO slot_aliases VALUES (?, ?, ?)", (device_id, slot, alias))
+                    self.db.execute("INSERT INTO slot_alias_audit (device,slot,previous_alias,alias,changed_at) VALUES (?, ?, ?, ?, ?)",
+                                    (device_id, slot, previous, alias, stamp()))
+            self._persist()
+        return {"device_id": device_id, "slot": slot, "alias": alias}
+
     def snapshot(self, now=None):
         now = now or datetime.now(UTC)
         devices = []
@@ -382,6 +420,8 @@ class FaultMonitor:
                                 "port_data_current": not stale and not self.reference_only and bool(state.get("success")) and current_values["device"]["raw"] == "ok",
                                 "recent_connections": recent_connections.get(device.device_id, {}),
                                 "connection_log_status": self.connections.log_status(device.device_id),
+                                "slot_alias_editable": self.slot_alias_editable(device),
+                                "slot_aliases": dict(self.db.execute("SELECT slot,alias FROM slot_aliases WHERE device=?", (device.device_id,)).fetchall()),
                                 "ports": state.get("ports", []), "config": cfg})
             rows = self.db.execute("SELECT device,kind,interface,first_seen,confirmed_at,last_checked,recovered_at,ended_reason FROM incidents ORDER BY id DESC LIMIT 300").fetchall()
         devices.sort(key=lambda d: ({"critical": 0, "unknown": 1, "normal": 2}[d["status"]], d["hostname"]))

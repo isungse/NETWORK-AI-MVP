@@ -25,7 +25,7 @@ from .services.collection import public_command_plan, public_device, public_job_
 from .services.collection_workflow import CollectionWorkflow, WorkflowError
 from .services.change_workflow import ChangeWorkflow, ChangeWorkflowError
 from .services.monitoring import MonitoringHub
-from .services.fault_monitor import FaultMonitor
+from .services.fault_monitor import FaultMonitor, SlotAliasConflict
 from .services.port_protection import PortProtection
 from .services.topology import build_topology
 from .write_executor import PowerShellTelnetWriteExecutor
@@ -213,6 +213,18 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"success": True, "physical_confirmed": body["confirmed"]}
+
+    @app.post("/fault-monitor/devices/{device_id}/slots/{slot}/alias")
+    def update_slot_alias(device_id: str, slot: str, body: dict):
+        inventory_device(device_id)
+        try:
+            return fault_monitor.set_slot_alias(device_id, slot, body.get("alias"), body.get("expected_alias"))
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except SlotAliasConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/health")
     def health() -> dict[str, str]:

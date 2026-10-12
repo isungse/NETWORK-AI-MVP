@@ -387,6 +387,39 @@ main {
   color: #713b12;
 }
 .panel-footer, .panel-time, .module-label { color: #43536a; }
+.module-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+}
+.module-heading .module-label {
+  margin: 0;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.module-edit {
+  border: 1px solid #bfd0e2;
+  background: #fff;
+  border-radius: 5px;
+  color: #245a91;
+  font-family: inherit;
+  font-weight: 600;
+  line-height: 1.4;
+  font-size: 12px;
+  padding: 4px 9px;
+  min-height: 28px;
+  flex-shrink: 0;
+}
+.module-edit:hover { background: #eaf2fb; border-color: #245a91; }
+#slotAliasDialog { width: min(580px, calc(100vw - 32px)); }
+#slotAliasInput { display: block; width: 100%; margin-top: 8px; }
+.alias-preview { background: #f3f7fc; border: 1px solid #d7e2ee; border-radius: 6px; padding: 12px; }
+#slotAliasPreview { margin: 8px 0 0; font-weight: 650; overflow-wrap: anywhere; }
+.alias-save { background: #245a91; border-color: #245a91; color: #fff; }
+.alias-save:hover { background: #194474; color: #fff; }
+#slotAliasResult { color: #a12739; overflow-wrap: anywhere; }
 
 /* Recent activity is an additional marker; fault/slow/unknown fills retain meaning. */
 .socket.recent-connection, .port-tile.recent-connection {
