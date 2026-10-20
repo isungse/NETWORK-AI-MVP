@@ -26,6 +26,7 @@ from .services.collection_workflow import CollectionWorkflow, WorkflowError
 from .services.change_workflow import ChangeWorkflow, ChangeWorkflowError
 from .services.monitoring import MonitoringHub
 from .services.fault_monitor import FaultMonitor, SlotAliasConflict
+from .services.hub_ports import HubPortConflict
 from .services.port_protection import PortProtection
 from .services.topology import build_topology
 from .write_executor import PowerShellTelnetWriteExecutor
@@ -225,6 +226,47 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def hub_operation(operation, device_id, interface, **options):
+        inventory_device(device_id)
+        try:
+            return operation(device_id, interface, **options)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except HubPortConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/fault-monitor/devices/{device_id}/ports/{interface:path}/hub")
+    def hub_detail(device_id: str, interface: str):
+        return hub_operation(fault_monitor.hub_detail, device_id, interface)
+
+    @app.post("/fault-monitor/devices/{device_id}/ports/{interface:path}/hub")
+    def update_hub(device_id: str, interface: str, body: dict):
+        return hub_operation(fault_monitor.set_hub, device_id, interface, confirmed=body.get("confirmed"),
+                             name=body.get("name"), expected_revision=body.get("expected_revision"))
+
+    @app.post("/fault-monitor/devices/{device_id}/ports/{interface:path}/hub/refresh")
+    def refresh_hub_endpoints(device_id: str, interface: str):
+        if fault_monitor.reference_only:
+            raise HTTPException(status_code=403, detail="참고 화면에서는 장비를 수집할 수 없습니다.")
+        detail = hub_operation(fault_monitor.hub_detail, device_id, interface)
+        if not detail["hub"]["confirmed"]:
+            raise HTTPException(status_code=409, detail="허브 연결 포트로 등록한 뒤 조회하세요.")
+        targets = [device_id, *[d.device_id for d in inventory_devices() if d.role == "backbone" and d.device_id != device_id]]
+        results = []
+        for target in targets:
+            try:
+                response = collection_workflow.collect(target, "endpoints")
+                results.append({"device_id": target, "success": bool(response.get("success")),
+                                "collected_at": response.get("collected_at")})
+            except WorkflowError:
+                results.append({"device_id": target, "success": False})
+        return {"success": all(result["success"] for result in results), "collections": results,
+                "detail": hub_operation(fault_monitor.hub_detail, device_id, interface)}
 
     @app.get("/health")
     def health() -> dict[str, str]:

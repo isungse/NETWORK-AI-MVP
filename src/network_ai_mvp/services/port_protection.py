@@ -27,6 +27,9 @@ class PortProtection:
         device = self.inventory.get_device(device_id)
         cfg = self.monitor.config["devices"].get(device_id, {})
         interface = short_interface_name(interface)
+        with self.monitor.lock:
+            if self.monitor.hubs.get(device_id, interface)["confirmed"]:
+                return "허브 연결 등록 포트는 하위 여러 단말 보호를 위해 차단할 수 없습니다."
         if "backbone" in device.role:
             return "백본 장비의 포트는 일반 액세스 포트 제어에서 보호됩니다."
         if cfg.get("uplinks") is None:

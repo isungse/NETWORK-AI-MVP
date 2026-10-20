@@ -447,3 +447,20 @@ main {
 .connection-table-scroll th { position: sticky; top: 0; background: #f4f8fa; }
 .connection-evidence { display: block; margin-top: 4px; color: #43536a; font-size: 13px; font-weight: 400; white-space: normal; }
 .connection-history-item { border-bottom: 1px solid #e0e8ed; padding: 7px 0; }
+
+/* Hub registration does not replace status fills or the cyan NEW outline. */
+.socket.hub-connected, .port-tile.hub-connected { border: 2px solid #e00000; }
+.hub-marker { color: #c30000; background: #fff; font: 700 9px/12px system-ui, sans-serif; padding: 0 2px; }
+.socket .hub-marker { position: absolute; top: -3px; right: -3px; }
+.port-tile .hub-marker { margin-left: 5px; }
+.hub-legend { border: 2px solid #e00000; color: #a60000; padding: 2px 5px; font-size: 13px; }
+.hub-section { margin-top: 14px; padding: 12px; background: #fff; border: 1px solid #d9e2ec; border-radius: 6px; }
+.hub-section h4 { margin: 0 0 8px; }
+.hub-endpoints th, .hub-endpoints td { padding: 8px; text-align: left; vertical-align: top; border-bottom: 1px solid #e0e8ed; }
+.hub-endpoints { width: 100%; border-collapse: collapse; }
+.hub-endpoints code { white-space: nowrap; }
+#hubDialog { width: min(580px, calc(100vw - 32px)); }
+#hubNameInput { display: block; width: 100%; margin: 8px 0; }
+.hub-checkbox { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.hub-checkbox input { width: auto; }
+#hubResult { color: #a12739; overflow-wrap: anywhere; }

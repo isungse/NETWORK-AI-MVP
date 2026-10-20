@@ -78,7 +78,9 @@ const FaultPanel = (() => {
     if (metrics.some((p) => p.kind === "important")) roles.push("중요");
     const recent = device.recent_connections?.[name];
     const connection = recent?.physical_confirmed === true ? recent : null;
-    return { name, state, ...states[state], roles, metric, connection };
+    const hub = device.hub_ports?.[name]?.confirmed === true ? device.hub_ports[name] : null;
+    if (hub) roles.push("허브");
+    return { name, state, ...states[state], roles, metric, connection, hub };
   }
   function groups(device) {
     const ports = [...(device.panel_ports || device.ports || [])];

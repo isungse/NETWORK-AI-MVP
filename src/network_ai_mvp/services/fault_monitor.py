@@ -18,6 +18,7 @@ from ..observations import read_latest_port_observation
 from ..inventory import InventoryError
 from ..parsers import short_interface_name
 from .port_connections import PortConnections
+from .hub_ports import HubPorts
 
 LOG = logging.getLogger(__name__)
 UP = {"connected", "up"}
@@ -149,6 +150,7 @@ class FaultMonitor:
         self.db.execute("CREATE TABLE IF NOT EXISTS slot_alias_audit (id INTEGER PRIMARY KEY, device TEXT, slot TEXT, previous_alias TEXT, alias TEXT, changed_at TEXT)")
         self.db.execute("CREATE TABLE IF NOT EXISTS incidents (id INTEGER PRIMARY KEY, device TEXT, metric TEXT, kind TEXT, interface TEXT, first_seen TEXT, confirmed_at TEXT, last_checked TEXT, recovered_at TEXT, ended_reason TEXT)")
         self.connections = PortConnections(self.db)
+        self.hubs = HubPorts(self.db)
         self.db.commit()
         try:
             self._bootstrap(audit_path)
@@ -196,6 +198,11 @@ class FaultMonitor:
             self._persist()
 
     def consume(self, response):
+        if not self.reference_only:
+            with self.lock, self.db:
+                evidence_changed = self.hubs.consume(response)
+            if evidence_changed:
+                self._persist()
         # Endpoint/topology-only results cannot refresh interface health.
         purpose = response.get("purpose")
         if purpose not in {"interfaces", "baseline", "check", "port-endpoints", "link-diagnostics", "connection-events", "security-logs"}:
@@ -353,6 +360,38 @@ class FaultMonitor:
     def slot_alias_editable(self, device):
         return not self.reference_only
 
+    def hub_target(self, device_id, interface):
+        device = self.inventory.get_device(device_id)
+        interface = short_interface_name(interface)
+        if physical_slot_id(interface, device) is None:
+            raise ValueError("허브 정보는 물리 포트에만 등록할 수 있습니다.")
+        with self.lock:
+            if interface not in {short_interface_name(p.get("interface")) for p in self._state(device_id).get("ports", [])}:
+                raise LookupError("수집된 물리 포트를 선택하세요.")
+        return interface
+
+    def hub_detail(self, device_id, interface):
+        interface = self.hub_target(device_id, interface)
+        with self.lock:
+            evidence = self.hubs.endpoints(device_id, interface, now=datetime.now(UTC), stale_after=self.settings["stale_after_seconds"])
+            if self.reference_only:
+                evidence["mac_stale"] = True
+                for endpoint in evidence["endpoints"]:
+                    for binding in endpoint["ips"]:
+                        binding["stale"] = True
+            return {"device_id": device_id, "interface": interface, "hub": self.hubs.get(device_id, interface),
+                    "editable": not self.reference_only, **evidence}
+
+    def set_hub(self, device_id, interface, *, confirmed, name, expected_revision):
+        if self.reference_only:
+            raise PermissionError("참고 화면에서는 허브 정보를 편집할 수 없습니다.")
+        interface = self.hub_target(device_id, interface)
+        with self.lock:
+            with self.db:
+                hub = self.hubs.save(device_id, interface, confirmed, name, expected_revision, stamp())
+            self._persist()
+        return {"device_id": device_id, "interface": interface, "hub": hub}
+
     def slot_alias_slots(self, device):
         with self.lock:
             state = self._state(device.device_id)
@@ -448,6 +487,7 @@ class FaultMonitor:
                                 "slot_alias_editable": self.slot_alias_editable(device),
                                 "slot_alias_slots": self.slot_alias_slots(device),
                                 "slot_aliases": dict(self.db.execute("SELECT slot,alias FROM slot_aliases WHERE device=?", (device.device_id,)).fetchall()),
+                                "hub_ports": self.hubs.registered(device.device_id) if not self.reference_only else {},
                                 "ports": state.get("ports", []), "config": cfg})
             rows = self.db.execute("SELECT device,kind,interface,first_seen,confirmed_at,last_checked,recovered_at,ended_reason FROM incidents ORDER BY id DESC LIMIT 300").fetchall()
         devices.sort(key=lambda d: ({"critical": 0, "unknown": 1, "normal": 2}[d["status"]], d["hostname"]))
@@ -480,7 +520,14 @@ class FaultMonitor:
                 result = collect(device.device_id, "interfaces")
                 if result.get("success") and not self.stop_event.is_set():
                     # Log permissions/failures must not invalidate a successful interface check.
-                    collect(device.device_id, "connection-events")
+                    try:
+                        collect(device.device_id, "connection-events")
+                    except Exception:
+                        LOG.warning("Connection log collection failed for %s", device.device_id)
+                with self.lock:
+                    collect_endpoints = bool(self.hubs.registered(device.device_id)) or (device.role == "backbone" and self.hubs.registered())
+                if result.get("success") and collect_endpoints and not self.stop_event.is_set():
+                    collect(device.device_id, "endpoints")
             except Exception:
                 LOG.exception("Scheduled collection failed for %s", device.device_id)
         while not self.stop_event.is_set():

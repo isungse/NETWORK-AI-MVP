@@ -23,6 +23,9 @@ let fetchInFlight = false;
 let floorFilter = "";
 let slotEditor = null;
 let slotAliasSaving = false;
+let hubEditor = null;
+let hubSaving = false;
+let hubRefreshing = false;
 const time = (value) =>
   value
     ? new Intl.DateTimeFormat("ko-KR", {
@@ -368,6 +371,7 @@ function renderSwitchPanel(d) {
         if (view.roles.includes("중요")) number.append(node("span", "port-role", "★"));
         button.append(number, portSymbol());
         markRecentConnection(button, d, item.port);
+        markHubConnection(button, view);
         button.onclick = () => openDevice(d.device_id, view.name);
         grid.append(button);
       }
@@ -565,6 +569,7 @@ function renderDashboard(data) {
     }),
     uplinkArrow(),
     node("span", "role-legend", "업링크 · ★ 중요"),
+    node("span", "hub-legend", "HUB 빨간 테두리 · 허브 연결 등록"),
     (() => {
       const legend = node("span", "connection-legend");
       legend.append(node("span", "connection-marker connection-marker-new", "NEW"), " 청록 테두리 · 물리 연결 확인(24시간)");
@@ -664,13 +669,13 @@ async function refresh() {
   }
 }
 async function refreshDetail() {
-  if (!selectedDevice || !$("#deviceDialog").open || $("#changeDialog").open || $("#slotAliasDialog").open)
+  if (!selectedDevice || !$("#deviceDialog").open || $("#changeDialog").open || $("#slotAliasDialog").open || $("#hubDialog").open || hubRefreshing)
     return;
   const id = selectedDevice.device_id,
     generation = detailGeneration;
   try {
     const d = await api(`/fault-monitor/devices/${encodeURIComponent(id)}`);
-    if (generation !== detailGeneration || !$("#deviceDialog").open || $("#slotAliasDialog").open) return;
+    if (generation !== detailGeneration || !$("#deviceDialog").open || $("#slotAliasDialog").open || $("#hubDialog").open || hubRefreshing) return;
     const open = [...document.querySelectorAll("#detailBody details")].map(
         (e) => e.open,
       ),
@@ -882,6 +887,7 @@ function renderDetail(d) {
       button.setAttribute("aria-label", `${p.interface} · ${label}`);
       button.title = `${p.interface} · ${label} · ${p.speed || "속도 미확인"}`;
       markRecentConnection(button, d, p);
+      markHubConnection(button, view);
       button.onclick = () => selectPort(p, button);
       grid.append(button);
     }
@@ -942,6 +948,121 @@ function renderDetail(d) {
     history.append(node("p", "muted", "아직 확정된 장애 이력이 없습니다."));
   body.append(history);
 }
+function markHubConnection(button, view) {
+  if (!view.hub) return;
+  button.classList.add("hub-connected");
+  button.append(node("span", "hub-marker", "HUB"));
+  const label = `허브 연결 등록 · ${view.hub.name || "허브 장비명 미입력"}`;
+  button.title += ` · ${label}`;
+  button.setAttribute("aria-label", `${button.getAttribute("aria-label")} · ${label}`);
+}
+function hubPath(deviceId, interfaceName) {
+  return `/fault-monitor/devices/${encodeURIComponent(deviceId)}/ports/${encodeURIComponent(interfaceName)}/hub`;
+}
+function renderHubInfo(data, root, message = "") {
+  if (!root.isConnected) return;
+  root.replaceChildren(node("h4", "", "허브 연결 정보"));
+  const facts = node("dl", "facts");
+  facts.append(fact("허브 연결 등록", data.hub.confirmed ? "등록됨 · 빨간 테두리" : "미등록"));
+  if (data.hub.confirmed)
+    facts.append(fact("허브 장비명 · 전산팀 확인", data.hub.name || "미입력 · 현장 확인 후 입력하세요"));
+  root.append(facts);
+  const actions = node("div", "action-row");
+  if (data.editable) {
+    const edit = node("button", "", "허브 정보 편집");
+    edit.type = "button";
+    edit.onclick = () => {
+      hubEditor = {deviceId: data.device_id, interface: data.interface, revision: data.hub.revision};
+      $("#hubTarget").textContent = `${selectedDevice.hostname} · ${data.interface}`;
+      $("#hubConfirmed").checked = data.hub.confirmed;
+      $("#hubNameInput").value = data.hub.name;
+      $("#hubNameInput").disabled = !data.hub.confirmed;
+      $("#hubResult").textContent = "";
+      $("#hubDialog").showModal();
+      $(data.hub.confirmed ? "#hubNameInput" : "#hubConfirmed").focus();
+    };
+    actions.append(edit);
+    if (data.hub.confirmed) {
+      const collect = node("button", "", "IP·MAC 다시 수집");
+      collect.type = "button";
+      collect.onclick = async () => {
+        collect.disabled = true;
+        hubRefreshing = true;
+        result.textContent = "스위치 MAC과 백본 ARP를 수집하고 있습니다…";
+        try {
+          const response = await post(hubPath(data.device_id, data.interface) + "/refresh", {});
+          renderHubInfo(response.detail, root, response.success ? "IP·MAC 수집 완료" : "일부 수집에 실패했습니다. 과거 근거와 수집 시각을 확인하세요.");
+        } catch (error) {
+          result.textContent = "수집 실패 · " + error.message;
+          collect.disabled = false;
+        } finally {
+          hubRefreshing = false;
+        }
+      };
+      actions.append(collect);
+    }
+  }
+  root.append(actions);
+  const result = node("p", "muted", message);
+  result.setAttribute("role", "status");
+  root.append(result);
+  if (!data.hub.confirmed) return;
+  root.append(node("h4", "", "하위 단말 IP · MAC"),
+    node("p", "muted", `MAC 수집: ${time(data.mac_observed_at)}${data.mac_stale ? " · 과거 근거 또는 수집 실패" : ""}`),
+    node("p", "muted", "아래 주소는 허브 아래 단말의 주소입니다. 허브 자체의 MAC이나 장비명으로 자동 등록하지 않습니다."));
+  const table = node("table", "hub-endpoints"), head = node("tr"), thead = node("thead");
+  ["접속 IP", "MAC 주소", "IP 근거 · 수집 시각"].forEach((label) => head.append(node("th", "", label)));
+  thead.append(head);
+  table.append(thead);
+  const body = node("tbody");
+  for (const endpoint of data.endpoints) {
+    const row = node("tr"), ipCell = node("td"), evidence = node("td");
+    ipCell.textContent = endpoint.ips.map((entry) => entry.ip).join(", ") || "대응 IP 수집 정보 없음";
+    const macCell = node("td");
+    macCell.append(node("code", "", endpoint.mac));
+    for (const entry of endpoint.ips) {
+      const source = dashboard?.devices.find((device) => device.device_id === entry.source_device_id)?.hostname || entry.source_device_id;
+      evidence.append(node("p", "muted", `${source} ARP · ${time(entry.observed_at)}${entry.stale || data.mac_stale ? " · 과거 근거" : ""}`));
+    }
+    row.append(ipCell, macCell, evidence);
+    body.append(row);
+  }
+  table.append(body);
+  const wrap = node("div", "table-scroll");
+  wrap.append(table);
+  root.append(wrap);
+  if (!data.endpoints.length) root.append(node("p", "muted", "학습된 MAC 정보가 없습니다. IP·MAC 다시 수집으로 확인하세요."));
+}
+async function loadHubInfo(deviceId, interfaceName, root) {
+  try {
+    renderHubInfo(await api(hubPath(deviceId, interfaceName)), root);
+  } catch (error) {
+    if (root.isConnected) root.replaceChildren(node("p", "notice error", "허브 정보 확인 실패 · " + error.message));
+  }
+}
+async function saveHub(event) {
+  event.preventDefault();
+  if (!hubEditor || hubSaving) return;
+  const editor = hubEditor;
+  const confirmed = $("#hubConfirmed").checked, name = confirmed ? $("#hubNameInput").value : "";
+  hubSaving = true;
+  $("#hubForm").querySelectorAll("button, input").forEach((element) => element.disabled = true);
+  $("#closeHub").disabled = true;
+  $("#hubResult").textContent = "저장 중…";
+  try {
+    await post(hubPath(editor.deviceId, editor.interface), {confirmed, name, expected_revision: editor.revision});
+    $("#hubDialog").close();
+    await refresh();
+    await openDevice(editor.deviceId, editor.interface);
+  } catch (error) {
+    $("#hubResult").textContent = error.message;
+  } finally {
+    hubSaving = false;
+    $("#hubForm").querySelectorAll("button, input").forEach((element) => element.disabled = false);
+    $("#hubNameInput").disabled = !$("#hubConfirmed").checked;
+    $("#closeHub").disabled = false;
+  }
+}
 function selectPort(port, button) {
   selectedPort = port;
   document
@@ -958,15 +1079,21 @@ function selectPort(port, button) {
       `${!selectedDevice.port_data_current ? "과거 수집 상태" : "수집 상태"}: ${portStatus(port.status)} · ${port.speed || "속도 미확인"} · VLAN ${port.vlan || "미확인"}`,
     ),
   );
-  box.append(
+  if (!FaultPanel.portView(selectedDevice, port).hub) box.append(
     node(
       "p",
       "muted",
       `연결 IP: ${(port.endpoint_ips || []).join(", ") || "수집 정보 없음"}`,
     ),
   );
-  for (const mac of port.endpoint_macs || [])
-    box.append(node("code", "mac", mac));
+  if (!FaultPanel.portView(selectedDevice, port).hub)
+    for (const mac of port.endpoint_macs || []) box.append(node("code", "mac", mac));
+  if (FaultPanel.physical(port.interface, selectedDevice)) {
+    const hubSection = node("section", "hub-section");
+    hubSection.append(node("p", "muted", "허브 정보 확인 중…"));
+    box.append(hubSection);
+    loadHubInfo(selectedDevice.device_id, port.interface, hubSection);
+  }
   const connectionHistory = node("section", "connection-history");
   connectionHistory.append(node("p", "muted", "연결 이력 확인 중…"));
   box.append(connectionHistory);
@@ -976,6 +1103,7 @@ function selectPort(port, button) {
   );
   const blocked =
     port.protection_reason ||
+    (FaultPanel.portView(selectedDevice, port).hub ? "허브 연결 포트는 하위 단말 보호를 위해 차단할 수 없습니다." : null) ||
     (!selectedDevice.port_data_current
       ? "최근 수집이 없어 현재 포트 상태를 확인할 수 없습니다."
       : null) ||
@@ -1050,6 +1178,12 @@ $("#changeForm").addEventListener("submit", async (event) => {
   }
 });
 $("#slotAliasForm").addEventListener("submit", saveSlotAlias);
+$("#hubForm").addEventListener("submit", saveHub);
+$("#hubConfirmed").onchange = () => { $("#hubNameInput").disabled = !$("#hubConfirmed").checked; };
+for (const id of ["closeHub", "cancelHub"])
+  $("#" + id).onclick = () => $("#hubDialog").close();
+$("#hubDialog").addEventListener("cancel", (event) => { if (hubSaving) event.preventDefault(); });
+$("#hubDialog").addEventListener("close", () => { hubEditor = null; });
 $("#slotAliasInput").oninput = updateSlotAliasPreview;
 $("#clearSlotAlias").onclick = () => {
   $("#slotAliasInput").value = "";

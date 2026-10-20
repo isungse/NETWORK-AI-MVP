@@ -165,3 +165,15 @@ const stack = panel.groups({ ...device, panel_ports: [
 assert.equal(stack.groups.length, 3);
 assert.equal(stack.groups.filter(g => g.slot === "4-0").length, 2);
 assert.equal(stack.groups.filter(g => g.slot === "5-0").length, 1);
+
+const hubDevice = {...recentDevice, hub_ports: {Et1: {confirmed: true, name: "검사실 허브"}}};
+for (const [status, state] of [["connected", "connected"], ["notconnect", "idle"], ["disabled", "disabled"]]) {
+  const view = panel.portView(hubDevice, {interface: "Ethernet1", status});
+  assert.equal(view.state, state);
+  assert.equal(view.hub.name, "검사실 허브");
+  assert.ok(view.roles.includes("허브"));
+  assert.ok(view.connection);
+}
+assert.equal(panel.portView({...hubDevice, port_data_current: false}, port).state, "unknown");
+assert.equal(panel.portView({...device, hub_ports: {Et1: {confirmed: false}}}, port).hub, null);
+assert.equal(panel.portView(device, {...port, endpoint_macs: ["a", "b", "c"]}).hub, null);
