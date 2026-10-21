@@ -559,20 +559,24 @@ function renderDashboard(data) {
   select.replaceChildren(...options);
   select.value = floorFilter;
   $("#portLegend").replaceChildren(
-    ...Object.entries(FaultPanel.states).map(([state, spec]) => {
+    ...[["critical", "장애"], ["slow", "저속"], ["error", "오류"]].map(([state, text]) => {
       const label = node("span", `legend-item ${state}`);
       label.append(
         node("i", "legend-dot"),
-        node("span", "", `${spec.icon} ${spec.label}`),
+        node("span", "", text),
       );
       return label;
     }),
-    uplinkArrow(),
-    node("span", "role-legend", "업링크 · ★ 중요"),
-    node("span", "hub-legend", "HUB 빨간 테두리 · 허브 연결 등록"),
+    (() => {
+      const legend = node("span", "role-legend");
+      legend.append(uplinkArrow(), node("span", "", "업링크"));
+      return legend;
+    })(),
+    node("span", "role-legend", "중요"),
+    node("span", "hub-legend", "HUB"),
     (() => {
       const legend = node("span", "connection-legend");
-      legend.append(node("span", "connection-marker connection-marker-new", "NEW"), " 청록 테두리 · 물리 연결 확인(24시간)");
+      legend.append(node("span", "connection-marker connection-marker-new", "NEW"));
       return legend;
     })(),
   );
