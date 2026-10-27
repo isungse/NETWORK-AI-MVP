@@ -76,9 +76,19 @@ class HubPortsTests(unittest.TestCase):
         self.assertFalse(TestClient(self.new_app()).get(self.url).json()["hub"]["confirmed"])
         self.assertEqual(self.executor.calls, [])
 
+    def test_hub_name_length_boundary(self):
+        name = "가" * 200
+        result = self.save(name=name)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["hub"]["name"], name)
+        rejected = self.save(name=name + "나", revision=1)
+        self.assertEqual(rejected.status_code, 422)
+        self.assertIn("200자", rejected.json()["detail"])
+        self.assertEqual(self.client.get(self.url).json()["hub"]["name"], name)
+
     def test_validation_reference_and_exact_physical_target(self):
         for payload in ({}, {"confirmed": 1, "name": "", "expected_revision": 0},
-                        {"confirmed": True, "name": "a" * 81, "expected_revision": 0},
+                        {"confirmed": True, "name": "a" * 201, "expected_revision": 0},
                         {"confirmed": True, "name": "두\n줄", "expected_revision": 0},
                         {"confirmed": True, "name": "숨김\u202e문자", "expected_revision": 0},
                         {"confirmed": True, "name": None, "expected_revision": 0},

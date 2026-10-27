@@ -47,8 +47,8 @@ class HubPorts:
     def save(self, device, interface, confirmed, name, expected_revision, at):
         if type(confirmed) is not bool or not isinstance(name, str) or type(expected_revision) is not int or expected_revision < 0:
             raise ValueError("허브 연결 여부, 장비명과 기존 정보 버전을 올바르게 지정하세요.")
-        if len(name) > 80 or any(unicodedata.category(c).startswith("C") for c in name):
-            raise ValueError("허브 장비명은 제어 문자 없이 80자 이내로 입력하세요.")
+        if len(name) > 200 or any(unicodedata.category(c).startswith("C") for c in name):
+            raise ValueError("허브 장비명은 제어 문자 없이 200자 이내로 입력하세요.")
         name = name.strip() if confirmed else ""
         previous = self.get(device, interface)
         if previous["revision"] != expected_revision:
